@@ -1,0 +1,8 @@
+{
+  "appId": "com.habibenetcom.towerdestiny",
+  "appName": "Tower Destiny Survive",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  }
+}

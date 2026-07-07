@@ -1,0 +1,16 @@
+{
+  "name": "tds-android",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tower Destiny Survive — Android app (Capacitor wrapper around the tds-web build)",
+  "dependencies": {
+    "@capacitor-community/admob": "^6.2.0",
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/app": "^6.0.3",
+    "@capacitor/core": "^6.1.2",
+    "@capacitor/preferences": "^6.0.4"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2"
+  }
+}
