@@ -1,4 +1,4 @@
-package com.habibenetcom.towerdestiny;
+package com.TDS.zombietowerdefense;
 
 import com.getcapacitor.BridgeActivity;
 

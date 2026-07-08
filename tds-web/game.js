@@ -846,7 +846,7 @@ function drainRewards(done){
 }
 // ----- 5★ rate prompt: shown after clearing a level and every 10 battles, until the player rates once -----
 let ratingPending = false;
-const STORE_URL = 'https://play.google.com/store/apps/details?id=com.habibenetcom.towerdestiny';   // TODO: replace with your real store link
+const STORE_URL = 'https://play.google.com/store/apps/details?id=com.TDS.zombietowerdefense';   // TODO: replace with your real store link
 const RATE_REWARD = 1000;
 function queueRating(){ if (!Meta.rated) ratingPending = true; }
 function showRatingModal(done){

@@ -35,10 +35,13 @@ $env:ANDROID_SDK_ROOT='C:\Users\Habib Torjmen\AppData\Local\Android\Sdk'
 - Node + Capacitor 6, JDK from Android Studio's bundled JBR (OpenJDK 21), Android SDK
   (`...\AppData\Local\Android\Sdk`, platforms 30–36, build-tools). `android/local.properties`
   points Gradle at the SDK.
-- appId `com.habibenetcom.towerdestiny`, appName "Tower Destiny Survive".
+- appId `com.TDS.zombietowerdefense`, appName "Tower Destiny Survive".
 
 ## Notes / next steps
 - This is a **debug** APK. For a Play Store release you'd build a signed **release** AAB/APK
   (`gradlew bundleRelease` with a signing keystore) — ask and I'll set that up.
-- App icon is still the default Capacitor icon; the game's own icon can be generated with
-  `@capacitor/assets` if you want it branded.
+- App icon is the game's branded cannon-vs-zombie art. Source master lives at `assets/icon.png`
+  (1024×1024); the launcher assets under `android/app/src/main/res/mipmap-*` (legacy `ic_launcher`,
+  round `ic_launcher_round`, and adaptive `ic_launcher_foreground` + `@color/ic_launcher_background`
+  `#44538E`) are generated from it. To re-generate after swapping the art, replace `assets/icon.png`
+  and re-run the icon generator (or `npx @capacitor/assets generate --android`).

@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Tower Destiny Survive</string>
     <string name="title_activity_main">Tower Destiny Survive</string>
-    <string name="package_name">com.habibenetcom.towerdestiny</string>
-    <string name="custom_url_scheme">com.habibenetcom.towerdestiny</string>
+    <string name="package_name">com.TDS.zombietowerdefense</string>
+    <string name="custom_url_scheme">com.TDS.zombietowerdefense</string>
 </resources>
