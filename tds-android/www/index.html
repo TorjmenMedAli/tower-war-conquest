@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Fredoka:wght@500;600;700&family=Luckiest+Guy&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=64" />
+<link rel="stylesheet" href="style.css?v=75" />
 </head>
 <body>
 <div class="app" id="app">
@@ -23,6 +23,12 @@
       <button class="chip streak" id="toStreak"><span class="ico">🔥</span><b id="streakN">1</b></button>
     </header>
     <button class="chip snd" id="sndBtn" aria-label="Sound"><span class="ico">🔊</span></button>
+    <button class="chip missions" id="missionBtn" aria-label="Daily missions"><span class="ico">📋</span><span class="mdot" id="missionDot" style="display:none"></span></button>
+    <!-- Play Games Services (Android): shown only once signed in; no-op / hidden on web -->
+    <div class="games-btns" id="gamesBtns" style="display:none">
+      <button class="chip games" id="btnLeaderboard" aria-label="Leaderboards"><span class="ico">🏆</span></button>
+      <button class="chip games" id="btnAchievements" aria-label="Achievements"><span class="ico">🎖️</span></button>
+    </div>
 
     <div class="logo">
       <span class="logo-top">TOWER&nbsp;DESTINY</span>
@@ -109,6 +115,8 @@
     </div>
 
     <div class="ftue ftue-deploy" id="ftueDeploy" style="display:none">👇 DEPLOY A FORCE!</div>
+    <!-- Hero ultimate: charge meter fills via --fill; glows + becomes tappable when ready -->
+    <button class="ultbtn" id="ultBtn" style="display:none"><span class="ult-ic">⚡</span><span class="ult-tx">ULT</span></button>
     <div class="hud-bottom">
       <div class="sf-head">
         <div class="points"><span class="blt big"></span><b id="g_energy">0</b><i>PTS</i></div>
@@ -144,6 +152,8 @@
       <div class="chip coin"><span class="ico ic-coin"></span><b id="lv_coins">0</b></div>
     </header>
     <div class="levelmap" id="levelMap"><!-- 10 nodes injected by game.js --></div>
+    <!-- Endless / survival mode — appears once the final level is beaten -->
+    <button class="endless-btn" id="endlessBtn" style="display:none">♾️ ENDLESS SURVIVAL <i id="endlessBest"></i></button>
   </section>
 
   <!-- ===================== WEAPONS ===================== -->
@@ -326,7 +336,57 @@
     </div>
   </div>
 
+  <!-- STORY intro card (first entry to a level) -->
+  <div class="modal" id="storyModal">
+    <div class="panel storycard">
+      <div class="story-lv" id="stLevel">LEVEL 1</div>
+      <div class="story-name" id="stName">ZOMBIE CITY</div>
+      <p class="story-text" id="stText"></p>
+      <div class="story-boss" id="stBoss"></div>
+      <button class="big-btn green" id="stBegin">BEGIN ▸</button>
+    </div>
+  </div>
+
+  <!-- DAILY MISSIONS -->
+  <div class="modal" id="missionModal">
+    <div class="panel missionpanel">
+      <div class="missions-head"><span>📋 DAILY MISSIONS</span><button class="modal-x" id="missionClose">✕</button></div>
+      <div class="mission-list" id="missionList"></div>
+      <div class="missions-foot">New missions every day</div>
+    </div>
+  </div>
+
+  <!-- GLOBAL LEADERBOARD (Firestore) -->
+  <div class="modal" id="lbModal">
+    <div class="panel lbpanel">
+      <div class="lb-head"><span>🏆 LEADERBOARD</span><button class="modal-x" id="lbClose">✕</button></div>
+      <div class="lb-you" id="lbYou"></div>
+      <div class="lb-list" id="lbList"><div class="lb-empty">Loading…</div></div>
+      <div class="lb-foot">Best single-run score · updates after each battle</div>
+    </div>
+  </div>
+
+  <!-- NICKNAME prompt (first leaderboard use) -->
+  <div class="modal" id="nameModal">
+    <div class="panel namepanel">
+      <div class="name-title">CHOOSE A NICKNAME</div>
+      <div class="name-sub">This is how you appear on the leaderboard.</div>
+      <input class="name-input" id="nameInput" maxlength="16" placeholder="Player" autocomplete="off" />
+      <button class="big-btn green" id="nameSave">SAVE</button>
+    </div>
+  </div>
+
   <div class="flash" id="flash"></div>
+
+  <!-- Connectivity gate — this game requires an internet connection to play -->
+  <div class="netgate" id="netGate" role="alertdialog" aria-live="assertive">
+    <div class="netgate-card">
+      <div class="netgate-icon">📡</div>
+      <div class="netgate-title">NO CONNECTION</div>
+      <div class="netgate-sub">Tower Destiny Survive needs an internet connection to play. Please check your network and try again.</div>
+      <button class="big-btn netgate-btn" id="netRetry">RETRY</button>
+    </div>
+  </div>
 </div>
 <script src="weapons-art.js?v=26"></script>
 <script src="castle-art.js?v=26"></script>
@@ -335,14 +395,19 @@
 <script src="arsenal-art.js?v=26"></script>
 <script src="undead-art.js?v=28"></script>
 <script src="monster-art.js?v=26"></script>
-<script src="heroes-art.js?v=26"></script>
+<script src="heroes-art.js?v=27"></script>
 <script src="sfx.js?v=3"></script>
-<!-- Firebase Analytics + Remote Config (compat SDK from Google's CDN; loads in the browser AND the Android WebView) -->
+<!-- Firebase Analytics + Remote Config + Auth + Firestore (compat SDK from Google's CDN; loads in the browser AND the Android WebView) -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-analytics-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-remote-config-compat.js"></script>
-<script src="firebase.js?v=1"></script>
-<script src="native.js?v=1"></script>
-<script src="game.js?v=112"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="firebase.js?v=4"></script>
+<script src="cloud.js?v=3"></script>
+<script src="leaderboard.js?v=1"></script>
+<script src="native.js?v=6"></script>
+<script src="iap.js?v=1"></script>
+<script src="game.js?v=132"></script>
 </body>
 </html>

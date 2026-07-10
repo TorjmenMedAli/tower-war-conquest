@@ -23,6 +23,7 @@ body {
   position: relative;
   width: min(100vw, 460px);
   height: min(100vh, 940px);
+  height: min(100dvh, 940px);   /* dvh = the real, dynamic viewport (accounts for mobile system bars) */
   overflow: hidden;
   background: #0f121a;
   border-radius: 26px;
@@ -31,7 +32,7 @@ body {
     0 0 0 1px rgba(255,255,255,.06) inset,
     0 1px 0 rgba(255,255,255,.12) inset;
 }
-@media (max-width: 480px) { .app { width: 100vw; height: 100vh; border-radius: 0; } }
+@media (max-width: 480px) { .app { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; } }
 
 canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 /* subtle vignette/scrim over the canvas so UI text always reads */
@@ -50,7 +51,13 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 }
 
 /* screens */
-.screen { position: absolute; inset: 0; z-index: 2; display: none; flex-direction: column; padding: 12px; }
+.screen { position: absolute; inset: 0; z-index: 2; display: none; flex-direction: column;
+  /* keep all UI inside the device's safe area (status bar, notch/camera cutout, nav bar, rounded corners) */
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+/* the battle HUD's bottom box (.hud-bottom) sits FLUSH on the screen's bottom edge and pads its
+   own safe-area inset — zero the screen's bottom padding here, or the inset is applied TWICE on
+   gesture-nav phones (box looks hugely inflated there, while normal on 3-button phones) */
+#game.screen { padding-bottom: 0; }
 .screen.active { display: flex; animation: screenIn .34s cubic-bezier(.22,.9,.3,1) both; }
 @keyframes screenIn { from { opacity: 0; transform: translateY(10px) scale(.992); } to { opacity: 1; transform: none; } }
 
@@ -435,9 +442,9 @@ button:disabled:active { transform: none; }
 }
 .coinchip.bump { animation: bump .28s ease; }
 
-.hud-bottom { margin-top: auto; display: grid; gap: 10px;
+.hud-bottom { margin-top: auto; display: grid; gap: 8px;
   background: linear-gradient(var(--panel-top), var(--panel-bot)); border: 3px solid var(--panel-edge); border-bottom: none;
-  border-radius: 26px 26px 0 0; padding: 14px; padding-bottom: max(14px, env(safe-area-inset-bottom));
+  border-radius: 26px 26px 0 0; padding: 10px; padding-bottom: clamp(10px, env(safe-area-inset-bottom), 30px);   /* single, CAPPED inset — some WebViews over-report it */
   box-shadow: 0 -6px 16px rgba(0,0,0,.35), inset 0 2px 0 rgba(255,255,255,.2); }
 .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
 .abilities { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; align-items: stretch; }
@@ -808,7 +815,7 @@ button:disabled:active { transform: none; }
 .sfbar { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .sf {
   position: relative; border: none; cursor: pointer; color: #fff; font-family: inherit; font-weight: 700;
-  border-radius: 14px; min-height: 76px; padding: 6px 2px;
+  border-radius: 14px; min-height: 62px; padding: 5px 2px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
   background: linear-gradient(var(--green-top), var(--green-bot));
   box-shadow: 0 5px 0 var(--green-edge), 0 6px 9px rgba(0,0,0,.3), inset 0 -3px 6px rgba(0,0,0,.15);
@@ -1001,7 +1008,10 @@ button:disabled:active { transform: none; }
 .chest-tile .sc-buy { margin-top: 4px; padding: 6px 11px; font-size: 13px; }
 
 /* ===================== SOUND TOGGLE + FTUE HINTS + LEVEL STARS ===================== */
-.chip.snd { position: absolute; top: 62px; right: 12px; z-index: 6; padding: 6px 10px; }  /* floats under the topbar (5 chips overflow narrow screens) */
+.chip.snd { position: absolute; top: calc(62px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); z-index: 6; padding: 6px 10px; }  /* floats under the topbar (5 chips overflow narrow screens) */
+/* Play Games Services buttons — float under the topbar on the LEFT (mirrors the sound chip on the right) */
+.games-btns { position: absolute; top: calc(62px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); z-index: 6; display: flex; gap: 8px; }
+.chip.games { padding: 6px 10px; cursor: pointer; border: none; font: inherit; }
 .ftue {
   position: absolute; z-index: 40; left: 50%;
   background: linear-gradient(180deg, #ffe28a, #ffd24a); color: #3a2a00;
@@ -1036,3 +1046,116 @@ button:disabled:active { transform: none; }
   animation: starGlow 1.4s ease-in-out infinite;
 }
 @keyframes starGlow { 0%,100%{ filter: brightness(1); transform: scale(1); } 50%{ filter: brightness(1.18); transform: scale(1.05); } }
+
+/* ── Missions chip + notification dot (menu) ── */
+.chip.missions { position: absolute; top: calc(104px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); z-index: 6; padding: 6px 10px; cursor: pointer; }
+.chip.missions .mdot { position: absolute; top: -3px; right: -3px; width: 12px; height: 12px; border-radius: 50%;
+  background: #ff4d4d; border: 2px solid #fff; box-shadow: 0 0 6px rgba(255,60,60,.85); }
+
+/* ── Level-map boss silhouette ── */
+.ln-boss { font-size: 26px; margin-left: auto; padding: 0 4px; filter: drop-shadow(0 2px 2px rgba(0,0,0,.4)); flex: 0 0 auto; }
+.ln-boss.silhouette { filter: brightness(0) opacity(.5); }
+
+/* ── Hero-card mastery badge ── */
+.hc-mast { color: #ffd24a; font-weight: 800; }
+
+/* ── Global leaderboard modal ── */
+.lbpanel { width: min(92%, 420px); max-height: 80vh; display: flex; flex-direction: column; }
+.lb-head { display: flex; align-items: center; justify-content: space-between; font-size: 18px; font-weight: 900; color: #ffd24a; margin-bottom: 12px; }
+.lb-you { padding: 10px 12px; border-radius: 12px; margin-bottom: 10px; font-weight: 800; color: #fff;
+  background: linear-gradient(90deg, #2f7fe0, #4db4ff); display: flex; justify-content: space-between; }
+.lb-you.out { background: #2c3242; color: #9aa7b6; }
+.lb-list { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; -webkit-overflow-scrolling: touch; }
+.lb-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 11px;
+  background: linear-gradient(180deg, #243049, #1a2336); }
+.lb-row.me { outline: 2px solid #4db4ff; }
+.lb-rank { width: 34px; font-weight: 900; color: #ffd24a; text-align: center; flex: 0 0 auto; }
+.lb-rank.top { font-size: 18px; }
+.lb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #eef3fb; font-weight: 700; }
+.lb-score { font-weight: 900; color: #ffe07a; flex: 0 0 auto; }
+.lb-empty { text-align: center; color: #8f9cb0; padding: 24px 0; }
+.lb-foot { text-align: center; font-size: 11px; color: #7f8ca0; margin-top: 12px; }
+
+/* ── Nickname prompt ── */
+.namepanel { width: min(88%, 340px); text-align: center; }
+.name-title { font-size: 20px; font-weight: 900; color: #ffd24a; margin-bottom: 6px; }
+.name-sub { font-size: 13px; color: #c7d0e0; margin-bottom: 16px; }
+.name-input { width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 12px; border: 2px solid rgba(255,255,255,.15);
+  background: #161d2e; color: #fff; font-size: 17px; font-weight: 700; text-align: center; margin-bottom: 16px; outline: none; }
+.name-input:focus { border-color: #4db4ff; }
+
+/* ── Special-force cards: locked state + "first upgrade via ad" button ── */
+.sf-card.locked { filter: saturate(.5); opacity: .85; }
+.sf-card.locked .sfc-ico { filter: grayscale(.6) brightness(.85); }
+.sfc-lv.locked { color: #9aa7b6; font-weight: 800; }
+.wc-btn.adup { background: linear-gradient(180deg, #4db4ff, #2f7fe0); color: #fff; box-shadow: 0 3px 0 #1f5cae;
+  font-weight: 800; letter-spacing: .3px; }
+.wc-btn.adup:active { transform: translateY(2px); box-shadow: 0 1px 0 #1f5cae; }
+
+/* ── Story intro card ── */
+.storycard { text-align: center; max-width: 340px; }
+.story-lv { font-size: 13px; font-weight: 800; letter-spacing: 2px; color: #8fb7ff; }
+.story-name { font-size: 26px; font-weight: 900; color: #ffd24a; margin: 2px 0 12px; text-shadow: 0 2px 4px rgba(0,0,0,.5); }
+.story-text { font-size: 15px; line-height: 1.5; color: #dbe4f2; margin: 0 0 14px; }
+.story-boss { font-size: 15px; font-weight: 700; color: #ff8a8a; margin-bottom: 18px; }
+
+/* ── Daily missions modal ── */
+.missionpanel { width: min(90%, 380px); }
+.missions-head { display: flex; align-items: center; justify-content: space-between; font-size: 18px; font-weight: 900; color: #ffd24a; margin-bottom: 14px; }
+.mission-list { display: flex; flex-direction: column; gap: 10px; }
+.mission-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 14px;
+  background: linear-gradient(180deg, #243049, #1a2336); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); }
+.mission-row.claimed { opacity: .55; }
+.mi-ico { font-size: 24px; flex: 0 0 auto; }
+.mi-mid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mi-mid b { font-size: 14px; color: #eef3fb; }
+.mi-mid em { font-style: normal; font-size: 11px; color: #9fb0c8; }
+.mi-bar { height: 7px; border-radius: 4px; background: #101827; overflow: hidden; }
+.mi-bar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, #4db4ff, #7cd84e); }
+.mi-claim { border: none; cursor: pointer; padding: 8px 12px; border-radius: 12px; font-weight: 800; font-size: 13px; color: #4a2c00;
+  background: linear-gradient(180deg, #ffdf6e, #f4a72a); box-shadow: 0 3px 0 #b3760f; display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto; }
+.mi-claim.locked { background: #2c3242; color: #6f7a8c; box-shadow: none; cursor: default; }
+.mi-claim.done { background: none; box-shadow: none; color: #7cd84e; font-size: 20px; padding: 8px; }
+.missions-foot { text-align: center; font-size: 11px; color: #7f8ca0; margin-top: 14px; }
+
+/* ── Endless / survival entry (levels screen) ── */
+.endless-btn { display: block; width: calc(100% - 24px); margin: 6px 12px 14px; padding: 14px; border: none; cursor: pointer;
+  border-radius: 16px; font-weight: 800; font-size: 17px; letter-spacing: .5px; color: #fff;
+  background: linear-gradient(180deg, #7b2fd6, #4a1c9c); box-shadow: 0 4px 0 #33136e, 0 6px 12px rgba(0,0,0,.35);
+  text-shadow: 0 1px 2px rgba(0,0,0,.5); }
+.endless-btn i { font-style: normal; font-weight: 700; opacity: .85; font-size: 13px; }
+.endless-btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #33136e, 0 3px 7px rgba(0,0,0,.35); }
+/* hero-card locked state (heroes are earned by clearing levels, not bought) */
+.wc-btn.locked { background: #2c3242; color: #9aa7b6; box-shadow: none; cursor: default; font-size: 12px; font-weight: 700; }
+
+/* ── Hero ultimate button (in-battle) — charge meter + ready state ── */
+/* Round floating action button, seated ABOVE the special-forces bar so it never overlaps it.
+   The charge fills the orb bottom→top via --fill; when ready it turns gold, glows and pulses. */
+.ultbtn { position: absolute; right: 14px; bottom: 520px; z-index: 8; width: 66px; height: 66px;
+  border: none; border-radius: 50%; cursor: pointer; padding: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+  color: #fff; font-weight: 800; font-size: 10px; letter-spacing: .5px; text-shadow: 0 1px 2px rgba(0,0,0,.6);
+  background: linear-gradient(0deg, #f0a71e var(--fill,0%), #2c3242 var(--fill,0%));
+  box-shadow: 0 3px 7px rgba(0,0,0,.5), inset 0 0 0 3px rgba(255,255,255,.14); opacity: .92; transition: opacity .2s; }
+.ultbtn .ult-ic { font-size: 22px; line-height: 1; }
+.ultbtn:not(.ready) { pointer-events: none; }
+.ultbtn.ready { opacity: 1; color: #4a2c00; text-shadow: none;
+  background: radial-gradient(circle at 50% 38%, #fff2b0, #ffce54 60%, #f4a72a);
+  box-shadow: 0 0 0 3px rgba(255,255,255,.5), 0 0 22px rgba(255,200,80,.9); animation: ultPulse 1s ease-in-out infinite; }
+@keyframes ultPulse { 0%,100%{ transform: scale(1); } 50%{ transform: scale(1.09); box-shadow: 0 0 0 3px rgba(255,255,255,.6), 0 0 30px rgba(255,210,90,1); } }
+
+/* ── Connectivity gate — blocks the whole app while offline (game requires internet) ── */
+.netgate { position: absolute; inset: 0; z-index: 100; display: none; place-items: center;
+  background: rgba(4,6,12,.94); }
+/* No entrance animation: a blocking error gate must be fully opaque the instant it shows. */
+.netgate.show { display: grid; }
+.netgate-card { width: min(84%, 340px); text-align: center; padding: 28px 22px; border-radius: 22px;
+  background: linear-gradient(180deg, #243049, #161d2e); border: 2px solid rgba(255,255,255,.08);
+  box-shadow: 0 18px 42px rgba(0,0,0,.55); }
+.netgate-icon { font-size: 56px; line-height: 1; margin-bottom: 10px; filter: drop-shadow(0 4px 6px rgba(0,0,0,.4));
+  animation: netPulse 1.6s ease-in-out infinite; }
+.netgate-title { font-size: 24px; font-weight: 900; letter-spacing: 1px; color: #ffd34d; margin-bottom: 8px; }
+.netgate-sub { font-size: 14px; line-height: 1.45; color: #c7d0e0; margin-bottom: 20px; }
+.netgate-btn { min-width: 160px; padding: 14px; font-size: 18px;
+  background: linear-gradient(180deg, #4db4ff, #2f7fe0); }
+@keyframes netPulse { 0%,100%{ opacity: 1; transform: scale(1); } 50%{ opacity: .55; transform: scale(.92); } }

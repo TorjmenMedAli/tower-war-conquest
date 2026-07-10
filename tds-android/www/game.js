@@ -26,10 +26,34 @@ const LEVEL_BG = {
   2: 'graveyard', 3: 'forest', 4: 'swamp', 5: 'sewer', 6: 'asylum',
   7: 'carnival', 8: 'cornfield', 9: 'subway', 10: 'lab',
 };
+// One-line story beat per level (shown once, on first entry) + the level's END BOSS (glyph shown
+// on the campaign map as a silhouette until unlocked). Boss order matches spawnBoss: (lv-1)%roster.
+const LEVEL_STORY = [
+  'The dead have overrun the city. Roll the convoy out and carve a path through the horde.',
+  'The road to safety cuts through an old graveyard — and its residents are not resting.',
+  'Ancient woods swallow the highway. Something older than the plague stirs in the dark.',
+  'A toxic swamp bubbles with mutated horrors. Keep the wheels turning — do not stop.',
+  'Descend into the flooded sewers. The walls are moving. Push through to the light.',
+  'The abandoned asylum still echoes with screams. Its keeper wants you to stay.',
+  'A ghost carnival lit by dead neon. The ringmaster has one last show planned for you.',
+  'Endless cornfields hide the swarm. Harvest season has come for the living.',
+  'The subway tunnels run deep. Ride the rails past the things that nest below.',
+  'The quarantine lab — ground zero. End it here, and end it for good.',
+];
+const LEVEL_BOSS = [
+  { name: 'Gloomtoad',   emoji: '🐸' }, { name: 'Cindermaw',  emoji: '🔥' },
+  { name: 'Rimewraith',  emoji: '❄️' }, { name: 'Oozecrawler', emoji: '🟢' },
+  { name: 'Dreadshade',  emoji: '👻' }, { name: 'Voltfang',    emoji: '⚡' },
+  { name: 'Stonejaw',    emoji: '🪨' }, { name: 'Thornstalker', emoji: '🌿' },
+  { name: 'Galewing',    emoji: '🦅' }, { name: 'Voidcrawler', emoji: '🌌' },
+];
 
 // Weapons mount on the castle wall. You can OWN several but EQUIP at most 2.
 // Each has a combat profile; `dir` selects the per-level PNG art, `key` the SVG fallback.
-const WEAPON_SLOTS = 2;
+// Weapon mount count grows with the wagon étage (0=Battle Cart→2, 1=Fortified→4, 2=Siege Tower→6).
+const WEAPON_SLOTS_BY_ETAGE = [2, 4, 6];
+function wagonEtage(){ return Math.max(0, Math.min(2, Meta.wagon | 0)); }
+function weaponSlots(){ return WEAPON_SLOTS_BY_ETAGE[wagonEtage()]; }
 const WEAPON_MAX = 40;                                   // each weapon upgrades 1 → 40 (keeps late-game growth alive once tank/castle/wagon cap out)
 // ── GRIND DIAL ───────────────────────────────────────────────────────────────
 // Enemies get tougher every level, so the player must upgrade gear (more damage +
@@ -92,6 +116,115 @@ const rarityMult = h => RARITY_MULT[h && h.rarity] || 1;
 const HERO_EMOJI = { ranger: '🤠', kate: '👮‍♀️', doc: '🎩', slinger: '🔫', outlaw: '🦹', nomad: '🐫' };
 const HERO_UNLOCK = { Common: 60, Rare: 150, Epic: 300, Legendary: 500 };          // gem cost to unlock a locked hero
 const HERO_UNLOCK_COIN = { Common: 5000, Rare: 12000, Epic: 24000, Legendary: 40000 }; // = gems × 80 (consistent)
+
+// ── CAMPAIGN HERO PROGRESSION ────────────────────────────────────────────────
+// Each level has ONE hero. You start owning level 1's hero; clearing a level unlocks the
+// NEXT level's hero (a first-clear popup announces it). Clearing the LAST level unlocks the
+// Battle Tank as the grand-finale hero. Heroes are earned ONLY by playing (no shop unlock).
+// Order ramps by rarity so the reward grows with the challenge.
+const HERO_BY_LEVEL = [
+  'sq_rifleman',   // L1  Common   (starter — owned from the start)
+  'sq_scout',      // L2  Common
+  'sq_pyro',       // L3  Rare
+  'sq_riot',       // L4  Rare
+  'sq_archer',     // L5  Rare
+  'sq_knight',     // L6  Epic
+  'sq_juggernaut', // L7  Epic
+  'sq_jet',        // L8  Epic
+  'sq_mage',       // L9  Legendary
+  'sq_skybomber',  // L10 Legendary
+];
+const HERO_FINALE = 'tank';                              // unlocked by clearing the final level
+const STARTER_HERO = HERO_BY_LEVEL[0];
+const STAR_MILESTONE = 3, STAR_REWARD_GEMS = 15;         // every 3 total campaign stars → a gem reward (mastery track)
+const REPLAY_COIN_MULT = 0.4;                            // replaying a cleared level pays 40% of the first-clear purse
+// the hero GRANTED by clearing `level` (1-based): the next level's hero, or the finale after the last.
+function heroGrantedByClearing(level){ return level >= LEVELS.length ? HERO_FINALE : HERO_BY_LEVEL[level]; }
+// which level you must CLEAR to earn a given hero (finale = the last level; starter = level 1).
+function heroUnlockLevel(id){ if (id === HERO_FINALE) return LEVELS.length; const i = HERO_BY_LEVEL.indexOf(id); return i > 0 ? i : 1; }
+// the next hero the player hasn't earned yet (for the "coming up" preview), or null if all owned.
+function nextLockedHero(){ const id = HERO_BY_LEVEL.find(x => !heroOwned(x)) || (!heroOwned(HERO_FINALE) ? HERO_FINALE : null); return id ? HEROES.find(h => h.id === id) : null; }
+// HEROES index (1-based, for Meta.hero) of a hero id.
+function heroIndexOf(id){ const i = HEROES.findIndex(h => h.id === id); return (i < 0 ? 0 : i) + 1; }
+// derive owned heroes from campaign progress: the starter + every hero for a level you've
+// unlocked + the finale once the last level is beaten. Unions with existing owned (so saves
+// that already had heroes keep them). Called on load and after each clear.
+function reconcileHeroes(){
+  const owned = new Set(Array.isArray(Meta.heroesOwned) ? Meta.heroesOwned : []);
+  owned.add(STARTER_HERO);
+  for (let L = 1; L <= (Meta.unlocked | 0); L++) if (HERO_BY_LEVEL[L - 1]) owned.add(HERO_BY_LEVEL[L - 1]);
+  if (Meta.stars && Meta.stars[LEVELS.length]) owned.add(HERO_FINALE);          // beat the last level → Battle Tank
+  Meta.heroesOwned = Array.from(owned).filter(id => HEROES.some(h => h.id === id));
+}
+
+// ── PER-HERO BULLETS ─────────────────────────────────────────────────────────
+// Every hero fires a visually distinct projectile (colour / size / glow). Weapons and allies
+// keep the default `bolt`. A shot carries its style so drawShots() can render the right one.
+const BULLETS = {
+  bolt:    { core:'#fff6d0', trail:'#ffe07a', r:3.4, w:5.5 },                    // default (weapons/allies)
+  spark:   { core:'#ffffff', trail:'#bfefff', r:2.8, w:4.5 },                    // fast & light (scout)
+  fire:    { core:'#fff1a8', trail:'#ff7a2a', r:4.4, w:7.5, glow:'#ff4400' },    // fireball (pyro)
+  slug:    { core:'#eef3f9', trail:'#9aa7b6', r:4.8, w:8.0 },                    // heavy metal (riot/jugg/tank)
+  arrow:   { core:'#e6ffc4', trail:'#7cd84e', r:3.0, w:4.5 },                    // bolt/arrow (archer)
+  plasma:  { core:'#e0fbff', trail:'#22d3ee', r:3.9, w:6.5, glow:'#00b3d6' },    // energy (jet)
+  arcane:  { core:'#f4ddff', trail:'#9B5DE0', r:4.5, w:7.5, glow:'#7b2fd6' },    // magic (mage)
+  bomblet: { core:'#ffd7a8', trail:'#ff9040', r:4.2, w:6.5, glow:'#ff6000' },    // ordnance (sky bomber)
+};
+const HERO_BULLET = {
+  tank:'slug', sq_rifleman:'bolt', sq_scout:'spark', sq_pyro:'fire', sq_riot:'slug',
+  sq_archer:'arrow', sq_knight:'bolt', sq_juggernaut:'slug', sq_jet:'plasma',
+  sq_mage:'arcane', sq_skybomber:'bomblet',
+};
+function heroBullet(h){ return BULLETS[HERO_BULLET[h && h.id]] || BULLETS.bolt; }
+
+// ── HERO MASTERY ─────────────────────────────────────────────────────────────
+// Playing a hero earns it mastery XP; each mastery level is a small permanent damage perk,
+// rewarding players who cycle the roster. XP is stored per hero id in Meta.heroMastery.
+const MASTERY_STEP = 3, MASTERY_MAX = 5, MASTERY_DMG = 0.03;   // 3 battles / level · 5 levels · +3% dmg each (≈+15%)
+function heroMasteryLevel(h){ const xp = (Meta.heroMastery && Meta.heroMastery[h && h.id]) || 0; return Math.min(MASTERY_MAX, Math.floor(xp / MASTERY_STEP)); }
+function heroMasteryMult(h){ return 1 + heroMasteryLevel(h) * MASTERY_DMG; }
+function addHeroMastery(id, n){ if (!id) return; Meta.heroMastery = Meta.heroMastery || {}; Meta.heroMastery[id] = (Meta.heroMastery[id] || 0) + (n || 1); }
+
+// ── DAILY MISSIONS ───────────────────────────────────────────────────────────
+// Three missions that reset each day; completing one pays gems. Progress is driven by
+// gameplay events (missionEvent) and persisted per day in Meta.missions.
+// Pool of mission templates. Three are chosen DETERMINISTICALLY per day (so everyone sees the
+// same set that day, and it rotates each day) — never the same three every day.
+const MISSION_POOL = [
+  { id: 'win3',   icon: '🏆', text: 'Win 3 battles',       type: 'win',  target: 3,   gems: 6 },
+  { id: 'win5',   icon: '🏆', text: 'Win 5 battles',       type: 'win',  target: 5,   gems: 9 },
+  { id: 'play4',  icon: '⚔️', text: 'Play 4 battles',      type: 'play', target: 4,   gems: 5 },
+  { id: 'kill150',icon: '💀', text: 'Defeat 150 enemies',  type: 'kill', target: 150, gems: 6 },
+  { id: 'kill300',icon: '💀', text: 'Defeat 300 enemies',  type: 'kill', target: 300, gems: 10 },
+  { id: 'ult2',   icon: '⚡', text: 'Unleash 2 ultimates', type: 'ult',  target: 2,   gems: 8 },
+  { id: 'ult4',   icon: '⚡', text: 'Unleash 4 ultimates', type: 'ult',  target: 4,   gems: 12 },
+  { id: 'boss2',  icon: '👹', text: 'Defeat 2 bosses',     type: 'boss', target: 2,   gems: 9 },
+  { id: 'star3',  icon: '⭐', text: 'Earn 3 stars',        type: 'star', target: 3,   gems: 8 },
+];
+const MISSIONS_PER_DAY = 3;
+// deterministic per-day pick of 3 DISTINCT missions (murmur-style avalanche hash of index×day → lowest 3)
+function dailyMissions(day){
+  const h = i => { let x = (((i + 1) * 374761393) + ((day + 1) * 668265263)) >>> 0;
+    x = Math.imul(x ^ (x >>> 15), 2246822519) >>> 0; x = Math.imul(x ^ (x >>> 13), 3266489917) >>> 0; return (x ^ (x >>> 16)) >>> 0; };
+  return MISSION_POOL.map((m, i) => i).sort((a, b) => h(a) - h(b)).slice(0, MISSIONS_PER_DAY).sort((a, b) => a - b).map(i => MISSION_POOL[i]);
+}
+function currentMissions(){ return dailyMissions(dayNum()); }
+function missionsToday(){
+  const d = dayNum();
+  if (!Meta.missions || Meta.missions.day !== d){
+    Meta.missions = { day: d, prog: currentMissions().map(() => 0), claimed: currentMissions().map(() => false) };
+    Meta.save();
+  }
+  return Meta.missions;
+}
+function missionEvent(type, n){
+  if (window.__sim || !n) return;
+  const m = missionsToday(), list = currentMissions(); let changed = false;
+  list.forEach((ms, i) => { if (ms.type === type && (m.prog[i] | 0) < ms.target){ m.prog[i] = Math.min(ms.target, (m.prog[i] | 0) + n); changed = true; } });
+  if (changed){ Meta.save(); refreshMissionDot(); }
+}
+function missionClaimable(){ const m = missionsToday(), list = currentMissions(); return list.some((ms, i) => (m.prog[i] | 0) >= ms.target && !m.claimed[i]); }
+
 const heroOwned = id => (Meta.heroesOwned || []).includes(id);
 const heroUnlockCost = h => HERO_UNLOCK[h && h.rarity] || 150;
 const heroUnlockCoin = h => HERO_UNLOCK_COIN[h && h.rarity] || 4000;
@@ -142,10 +275,15 @@ const FORCES = [
   { id: 'airstrike', name: 'AIRSTRIKE', icon: '💥', cost: 24, kind: 'strike', dmg: 70, col: '#F4B731' },
 ];
 const sfLevel = id => Meta.sfLvl[id] || 1;
+// Forces are UNLOCKED ONE BY ONE: the Ranger is free from the start, the rest are bought with
+// coins (kept cheap). Each force's FIRST upgrade (Lv 1→2) can be paid in coins OR a rewarded ad.
+const SF_BUY = { ranger: 0, kate: 200, doc: 350, airstrike: 500 };   // cheap FLAT coin unlock cost per force (no grind multiplier)
+const sfBuyCost = id => (SF_BUY[id] != null ? SF_BUY[id] : 300);
+const sfOwned = id => (Meta.sfOwned || []).includes(id);
 
 const CASTLE_MAX = 6;                                    // castle build stages 0..6 (7 frames)
-const WAGON_MAX = 6;                                     // wagon armor tiers 0..6 (Lv 1..7)
-const WAGON_HP = 60;                                     // bonus max HP per wagon tier
+const WAGON_MAX = 2;                                     // 3 étages: 0=Battle Cart, 1=Fortified Wagon, 2=Siege Tower
+const WAGON_HP = 160;                                    // bonus max shield HP per étage
 
 const SFX = window.Sfx || { play(){}, setEnabled(){}, enabled: false };   // sfx.js loads first; stub if missing
 // ── PLAY TICKETS ─────────────────────────────────────────────────────────────
@@ -154,38 +292,48 @@ const SFX = window.Sfx || { play(){}, setEnabled(){}, enabled: false };   // sfx
 const PT_MAX = 10, PT_REGEN_MS = 5 * 60 * 1000;
 const Meta = {
   coins: 300, gems: 0, hp: 1, dmg: 1, pow: 1, starter: false, level: 1, unlocked: 1, rel: 0, games: 0,
-  sound: true, stars: {}, ftue: 0,                       // sound on/off · best stars per level · first-time-hint bitmask (1=play, 2=deploy)
+  sound: true, stars: {}, ftue: 0, starClaimed: 0,       // sound on/off · best stars per level · first-time-hint bitmask · star-track milestones claimed
   pticket: PT_MAX, pticketAt: 0,                         // play tickets (battle entry) · regen anchor timestamp
   wagon: 0, noAds: false, boostUntil: 0, energy: 0, tickets: 0, rated: false,   // rated: tapped the 5★ prompt (pays coins once, then stops nagging)
+  endlessBest: 0,                                        // best score in Endless / boss-rush mode (post-campaign)
+  bestScore: 0,                                          // best single-run score (feeds the global leaderboard)
+  name: '',                                              // leaderboard nickname (chosen once)
+  sv: 0,                                                 // monotonic save version — cloud conflict resolution (last-write-wins)
   dailyDay: 0, adDay: 0, adChestUsed: 0, adCoinUsed: 0, adGemUsed: 0,    // daily free chest + per-day ad-box limits
   streak: 0, streakDay: 0,                                 // daily login streak (day N pays 100·N coins)
-  heroesOwned: ['tank', 'sq_rifleman', 'sq_scout'],       // unlocked heroes (the rest cost gems/coins)
+  heroesOwned: [STARTER_HERO],                            // unlocked heroes — the rest are EARNED by clearing levels
   weapons: [1, 2], owned: [1, 2], wlv: [1, 1],           // equipped (max 2) · owned · per-weapon level
   castle: 0,                                             // castle build stage (0..CASTLE_MAX)
   hero: 1,                                               // equipped hero (1..HEROES.length)
   tankLvl: 1,                                            // Battle Tank tier (1..TANK_MAX)
   heroLvl: {},                                           // per-hero upgrade level (non-tank)
+  heroMastery: {},                                       // per-hero mastery XP (earned by playing that hero)
+  missions: null,                                        // daily missions { day, prog[], claimed[] }
+  storySeen: {},                                         // level ids whose intro story card was shown
   sfLvl: {},                                             // per-special-force upgrade level
+  sfOwned: ['ranger'],                                   // unlocked forces (Ranger free; buy the rest one by one)
   load(){ try { const d = JSON.parse(localStorage.getItem(SAVE)); if (d) Object.assign(Meta, d); } catch(e){} },
-  save(){ try { localStorage.setItem(SAVE, JSON.stringify({
+  save(){ try { Meta.sv = (Meta.sv | 0) + 1; localStorage.setItem(SAVE, JSON.stringify({   // sv = monotonic save counter → cloud last-write-wins
     coins:Meta.coins, gems:Meta.gems, hp:Meta.hp, dmg:Meta.dmg, pow:Meta.pow, starter:Meta.starter,
     level:Meta.level, unlocked:Meta.unlocked, weapons:Meta.weapons, owned:Meta.owned, wlv:Meta.wlv,
-    castle:Meta.castle, hero:Meta.hero, tankLvl:Meta.tankLvl, heroLvl:Meta.heroLvl, sfLvl:Meta.sfLvl, rel:Meta.rel, games:Meta.games,
+    castle:Meta.castle, hero:Meta.hero, tankLvl:Meta.tankLvl, heroLvl:Meta.heroLvl, heroMastery:Meta.heroMastery, missions:Meta.missions, storySeen:Meta.storySeen, sfLvl:Meta.sfLvl, sfOwned:Meta.sfOwned, rel:Meta.rel, games:Meta.games,
     wagon:Meta.wagon, noAds:Meta.noAds, boostUntil:Meta.boostUntil, energy:Meta.energy, tickets:Meta.tickets,
     dailyDay:Meta.dailyDay, adDay:Meta.adDay, adChestUsed:Meta.adChestUsed, adCoinUsed:Meta.adCoinUsed, adGemUsed:Meta.adGemUsed,
     streak:Meta.streak, streakDay:Meta.streakDay, heroesOwned:Meta.heroesOwned,
-    sound:Meta.sound, stars:Meta.stars, ftue:Meta.ftue, pticket:Meta.pticket, pticketAt:Meta.pticketAt, rated:Meta.rated })); } catch(e){} },
+    sound:Meta.sound, stars:Meta.stars, ftue:Meta.ftue, starClaimed:Meta.starClaimed, pticket:Meta.pticket, pticketAt:Meta.pticketAt, rated:Meta.rated,
+    endlessBest:Meta.endlessBest, bestScore:Meta.bestScore, name:Meta.name, wagonCapMig:Meta.wagonCapMig, sv:Meta.sv })); } catch(e){} },
   // castle stats — upgrading HP / the castle stage make the castle tankier
   heroMaxHp(){ return 430 + (Meta.hp - 1) * 70; },                          // hero core — the LAST line of defence (bigger base so a fresh run lasts ~1 min+)
   wagonMaxHp(){ return 200 + Meta.castle * 90 + Meta.wagon * WAGON_HP; },    // wagon shield — soaks damage first
   maxHp(){ return Meta.heroMaxHp() + Meta.wagonMaxHp(); },                   // total survivability (shield + core)
   dmgMult(){ return 1 + (Meta.dmg - 1) * 0.14; },
+  wagonDmgMult(){ return 1 + wagonEtage() * 0.10; },     // each étage also buffs mounted-weapon damage
   powIncome(){ return 1 + (Meta.pow - 1) * 0.45; },     // passive points/s — starts at 1.0/s
   hpCost(){ return Math.round((40 + (Meta.hp - 1) * 30) * PLAY_GRIND); },
   dmgCost(){ return Math.round((45 + (Meta.dmg - 1) * 32) * PLAY_GRIND); },
   powCost(){ return Math.round((50 + (Meta.pow - 1) * 35) * PLAY_GRIND); },
   castleCost(){ return Math.round((80 + Meta.castle * 110) * PLAY_GRIND); },
-  wagonCost(){ return Math.round((70 + Meta.wagon * 90) * PLAY_GRIND); },
+  wagonCost(){ return Math.round((120 + Meta.wagon * 240) * PLAY_GRIND); },
 };
 Meta.load();
 // normalize after load (migrate older single-weapon saves)
@@ -193,19 +341,39 @@ if (!Array.isArray(Meta.weapons)){ Meta.weapons = Meta.weapon ? [Meta.weapon] : 
 if (!Array.isArray(Meta.owned))  { Meta.owned = Array.from(new Set([...(Meta.weapons||[]), 1, 2])); }
 if (!Array.isArray(Meta.wlv))    Meta.wlv = [1, 1, 1, 1];
 while (Meta.wlv.length < WEAPONS.length) Meta.wlv.push(1);
-Meta.weapons = Meta.weapons.filter(id => id >= 1 && id <= WEAPONS.length).slice(0, WEAPON_SLOTS);
+Meta.weapons = Meta.weapons.filter(id => id >= 1 && id <= WEAPONS.length).slice(0, weaponSlots());
 if (!Meta.weapons.length) Meta.weapons = [1];
 Meta.owned = Array.from(new Set(Meta.owned.filter(id => id >= 1 && id <= WEAPONS.length).concat(Meta.weapons)));
 Meta.castle = Math.max(0, Math.min(CASTLE_MAX, Meta.castle | 0));
+// One-time migration: WAGON_MAX dropped 6→2 when the wagon became a 3-étage tower. Refund coins
+// for any tiers a returning player had bought above the new cap, so paid progression isn't lost.
+if (!Meta.wagonCapMig){
+  const savedWagon = Meta.wagon | 0;
+  if (savedWagon > WAGON_MAX){
+    let refund = 0;
+    for (let L = WAGON_MAX + 1; L <= savedWagon; L++) refund += Math.round((70 + (L - 1) * 90) * PLAY_GRIND);  // old wagonCost(L-1)
+    Meta.coins = (Meta.coins | 0) + refund;
+  }
+  Meta.wagonCapMig = true;
+  Meta.save();                                          // persist flag + refund so it can never run twice
+}
 Meta.wagon = Math.max(0, Math.min(WAGON_MAX, Meta.wagon | 0));
 if (Meta.hero < 1 || Meta.hero > HEROES.length) Meta.hero = 1;
-if (!Array.isArray(Meta.heroesOwned) || !Meta.heroesOwned.length) Meta.heroesOwned = ['tank', 'sq_rifleman', 'sq_scout'];
-if (!Meta.heroesOwned.includes('tank')) Meta.heroesOwned.push('tank');
-{ const eqH = HEROES[Meta.hero - 1]; if (!eqH || !Meta.heroesOwned.includes(eqH.id)){ const ti = HEROES.findIndex(h => h.id === 'tank'); Meta.hero = (ti >= 0 ? ti : 0) + 1; } }
+if (!Array.isArray(Meta.heroesOwned)) Meta.heroesOwned = [];
 Meta.tankLvl = Math.max(1, Math.min(TANK_MAX, Meta.tankLvl | 0));
 if (typeof Meta.heroLvl !== 'object' || !Meta.heroLvl) Meta.heroLvl = {};
+if (typeof Meta.heroMastery !== 'object' || !Meta.heroMastery) Meta.heroMastery = {};
+if (typeof Meta.storySeen !== 'object' || !Meta.storySeen) Meta.storySeen = {};
+Meta.sv = Meta.sv | 0;
 if (typeof Meta.sfLvl !== 'object' || !Meta.sfLvl) Meta.sfLvl = {};
+// forces ownership: Ranger always free; migrate older saves so any force already upgraded stays owned
+{ const so = new Set(Array.isArray(Meta.sfOwned) ? Meta.sfOwned : []); so.add('ranger');
+  for (const f of FORCES) if ((Meta.sfLvl[f.id] || 1) > 1) so.add(f.id);
+  Meta.sfOwned = Array.from(so).filter(id => FORCES.some(f => f.id === id)); }
 if (typeof Meta.stars !== 'object' || !Meta.stars) Meta.stars = {};
+// campaign hero ownership (starter + earned by levels + finale); keep the equipped hero valid.
+reconcileHeroes();
+{ const eqH = HEROES[Meta.hero - 1]; if (!eqH || !heroOwned(eqH.id)) Meta.hero = heroIndexOf(STARTER_HERO); }
 Meta.ftue = Meta.ftue | 0;
 if (typeof Meta.pticket !== 'number' || isNaN(Meta.pticket)) Meta.pticket = PT_MAX;
 Meta.pticket = Math.max(0, Math.min(PT_MAX, Meta.pticket | 0));
@@ -216,11 +384,11 @@ if (!Meta.rel){
   Meta.coins = 300; Meta.gems = 0;
   Meta.hp = 1; Meta.dmg = 1; Meta.pow = 1; Meta.castle = 0;
   Meta.weapons = [1]; Meta.owned = [1]; Meta.wlv = Array(WEAPONS.length).fill(1);
-  Meta.hero = 1; Meta.tankLvl = 1; Meta.heroLvl = {}; Meta.sfLvl = {};
+  Meta.hero = heroIndexOf(STARTER_HERO); Meta.tankLvl = 1; Meta.heroLvl = {}; Meta.sfLvl = {}; Meta.sfOwned = ['ranger'];
   Meta.games = 0; Meta.wagon = 0; Meta.noAds = false; Meta.boostUntil = 0; Meta.energy = 0; Meta.tickets = 0;
   Meta.dailyDay = 0; Meta.adDay = 0; Meta.adChestUsed = 0; Meta.adCoinUsed = 0; Meta.adGemUsed = 0;
   Meta.streak = 0; Meta.streakDay = 0;
-  Meta.heroesOwned = ['tank', 'sq_rifleman', 'sq_scout'];
+  Meta.heroesOwned = [STARTER_HERO];                     // campaign-only: earn the rest by clearing levels
   Meta.level = 1; Meta.unlocked = 1;
   Meta.rel = 1; Meta.save();
 }
@@ -230,7 +398,7 @@ Meta.level = Math.max(1, Math.min(Meta.unlocked, Meta.level | 0));
 SFX.setEnabled(Meta.sound !== false);
 
 const heroLevel = h => h.tank ? Meta.tankLvl : (Meta.heroLvl[h.id] || 1);
-const heroDmg   = h => (h.dmg || 18) * (1 + 0.12 * (heroLevel(h) - 1)) * rarityMult(h) * Meta.dmgMult();
+const heroDmg   = h => (h.dmg || 18) * (1 + 0.12 * (heroLevel(h) - 1)) * rarityMult(h) * Meta.dmgMult() * heroMasteryMult(h);
 
 /* ---------------- DOM helpers ---------------- */
 const $ = id => document.getElementById(id);
@@ -259,6 +427,9 @@ function resize(){
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 200));          // re-measure after the rotation settles
+if (window.visualViewport) window.visualViewport.addEventListener('resize', resize);  // system-bar / keyboard viewport changes
+setTimeout(resize, 300); setTimeout(resize, 1200);                                    // WebViews often report the wrong size on first paint
 
 /* ---------------- Constants & state ---------------- */
 const REWARD = 3, SCROLL_SPD = 96;                      // score/kill (coins) · world scroll speed (px/s @ S=1)
@@ -327,6 +498,7 @@ const S = () => H / 900;
 const groundY = () => H * 0.70;
 const levelLen = () => (16000 + ((state.level || 1) - 1) * 2200) * S();   // finish distance (L1 16000 ≈ 2.8min … L10 35800 ≈ 6.2min + fort/boss fights)
 try { window.levelLen = levelLen; } catch(e){}
+try { window.TDS_BUSY = () => state.screen === 'game' && !state.over; } catch(e){}   // cloud.js: don't reload mid-battle
 
 /* ---- world layout: the hero advances right; the castle is the start point it departs ---- */
 function castleDims(){
@@ -341,18 +513,75 @@ const CS = S;                                            // convoy uses the glob
 function heroPos(){ const s = S(); return { x: 172 * s, y: groundY() }; }
 // the spot in front of the hero where enemies land their hits on the convoy
 function frontLine(){ return heroPos().x + 20 * S(); }
-// the convoy wagon rolls behind the hero; weapon 0 stands on the deck, weapon 1 up on the tower.
-// deckY / towerTop are the SURFACES weapons stand on (each weapon is anchored by its real pixels).
-function wagonGeom(){ const s = CS(); return { s, cx: heroPos().x - 96 * s, w: 134 * s, deckY: groundY() - 24 * s }; }
+// ── Armored war-wagon (imported "War-Wagon Asset Kit") ──────────────────────────
+// The wagon is a 3-étage upgradeable tower (Meta.wagon 0..2). Art is a 512×640 side
+// sprite per (stage × damage-state); weapons seat on fixed hardpoints; effects (smoke/
+// fire/explosion/dust) play from per-deck anchors. All coords are in sprite pixel space.
+const WAGON_SPR = { W: 512, H: 640, ground: 600 };        // sprite dims + ground-line Y
+// weapon hardpoints per étage: [x, y, deckIndex, maxW?] (deck 0=base A, 1=mid B, 2=cap C).
+// maxW caps the weapon's sprite-space width so guns seat on their OWN étage's exposed deck
+// surface without hanging off the sprite edge or covering the tier above (each étage stacks
+// differently, so the flat mount surfaces — and how much room a gun has — differ per stage).
+// Mount ORDER = assignment order (weapon 0 → first entry…), so the most VISIBLE mounts come
+// first — a player with 2 weapons sees them on the big prominent decks, not tucked at the sides.
+const WAGON_HP_PTS = [
+  // étage 0 (Battle Cart): one wide deck → two full-size guns on the mount sockets
+  [[192,356,0,130],[320,356,0,130]],
+  // étage 1 (Fortified Wagon): big upper-box mounts FIRST, then the lower crate's side corners
+  [[194,262,1,116],[318,262,1,116],[118,356,0,72],[394,356,0,72]],
+  // étage 2 (Siege Tower): fortress-top mounts FIRST, then the mid crate, then the base sides
+  [[210,156,2,78],[302,156,2,78],[156,260,1,60],[358,260,1,60],[118,356,0,72],[394,356,0,72]],
+];
+const WAGON_ANCHORS = [[256,360],[256,256],[256,150]];    // deck top-centre (effect anchor)
+const WAGON_DECK_BOT = [452,360,256];                     // deck base Y (dust anchor)
+const WAGON_WHEELS = [[150,523],[362,523]], WAGON_WHEEL_R = 74;   // wheel centres + radius (sprite space, shared across étages)
+// spinning wheels drawn OVER the sprite's baked wheels — they roll with state.scroll (the advance).
+function drawWagonWheels(g){
+  for (const wc of WAGON_WHEELS){
+    const c = g.spr(wc[0], wc[1]), r = WAGON_WHEEL_R * g.scale;
+    ctx.fillStyle = '#cfd6dd'; ctx.beginPath(); ctx.arc(c.x, c.y, r, 0, 7); ctx.fill();          // steel rim
+    ctx.fillStyle = '#9aa2ab'; ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.9, 0, 7); ctx.fill();
+    ctx.fillStyle = '#6f7780';                                                                    // rim bolts
+    for (let k = 0; k < 10; k++){ const a = k * Math.PI / 5; ctx.beginPath(); ctx.arc(c.x + Math.cos(a) * r * 0.95, c.y + Math.sin(a) * r * 0.95, r * 0.055, 0, 7); ctx.fill(); }
+    ctx.save(); ctx.translate(c.x, c.y); ctx.rotate(state.scroll / r);                            // wooden hub + spokes spin
+    ctx.fillStyle = '#8c6239'; ctx.beginPath(); ctx.arc(0, 0, r * 0.8, 0, 7); ctx.fill();
+    ctx.strokeStyle = '#5a3f24'; ctx.lineWidth = r * 0.12; ctx.lineCap = 'round';
+    for (let k = 0; k < 8; k++){ const a = k * Math.PI / 4; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * r * 0.72, Math.sin(a) * r * 0.72); ctx.stroke(); }
+    ctx.restore();
+    ctx.fillStyle = '#5a636c'; ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.22, 0, 7); ctx.fill();    // hub cap
+    ctx.fillStyle = '#3a4149'; ctx.beginPath(); ctx.arc(c.x, c.y, r * 0.1, 0, 7); ctx.fill();
+  }
+}
+// draw the wagon sprite so its ground-line sits on groundY(), centred behind the hero.
+function wagonGeom(){
+  const s = CS();
+  const dispH = 200 * s, scale = dispH / WAGON_SPR.H;
+  const cx = heroPos().x - 80 * s;   // seat the wagon just behind the hero, fully on-screen (no left-edge clipping of the tower/guns)
+  const topY = groundY() - WAGON_SPR.ground * scale;      // screen-Y of sprite y=0
+  const leftX = cx - (WAGON_SPR.W / 2) * scale;
+  return { s, scale, cx, topY, leftX, dispH,
+    w: 322 * scale, deckY: topY + 360 * scale,            // base-deck width / top (back-compat)
+    spr: (px, py) => ({ x: leftX + px * scale, y: topY + py * scale }) };
+}
 const heroIsTank = () => !!(HEROES[Meta.hero - 1] || HEROES[0]).tank;
-function towerX(){ const { cx, w } = wagonGeom(); return cx - w * 0.30; }
-function towerTop(){ const { deckY, s } = wagonGeom(); return deckY - 58 * s; }
 function weaponMounts(){
-  const { s, cx, w, deckY } = wagonGeom();
-  return [
-    { x: cx + w * 0.18, y: deckY },     // weapon 0: standing on the deck (front)
-    { x: towerX(),       y: towerTop() }, // weapon 1: standing on the tower platform (rear)
-  ];
+  const g = wagonGeom();
+  return WAGON_HP_PTS[wagonEtage()].map(p => { const q = g.spr(p[0], p[1]); return { x: q.x, y: q.y, deck: p[2] }; });
+}
+// animated effect sheets (horizontal frame strips). Returns false once a one-shot ends.
+const FXSHEET = {
+  smoke:     { key:'fx_smoke',     n:5, fps:12, loop:true  },
+  fire:      { key:'fx_fire',      n:5, fps:14, loop:true  },
+  explosion: { key:'fx_explosion', n:8, fps:20, loop:false },
+  dust:      { key:'fx_dust',      n:6, fps:16, loop:false },
+};
+function drawFxSheet(name, cx, y, scale, tStart, anchor){
+  const f = FXSHEET[name], im = IMG[f.key]; if (!im || !im.naturalWidth) return false;
+  let fi = Math.floor((state.t - tStart) * f.fps);
+  if (f.loop) fi = ((fi % f.n) + f.n) % f.n; else if (fi < 0 || fi >= f.n) return false;
+  const fw = im.naturalWidth / f.n, fh = im.naturalHeight, dw = fw * scale, dh = fh * scale;
+  ctx.drawImage(im, fi * fw, 0, fw, fh, cx - dw / 2, anchor === 'center' ? y - dh / 2 : y - dh, dw, dh);
+  return true;
 }
 
 /* ---- sprite sheets ---- */
@@ -400,21 +629,34 @@ function tankMoveImage(level, i){ const ph = i / TANK_FRAMES; return tankFrame(l
 function tankFireImage(level){ return tankFrame(level, 'fire', { recoil: 13, flash: true }); }
 
 /* ---------------- Run lifecycle ---------------- */
-function newCastle(){ const h = Meta.heroMaxHp(), w = Meta.wagonMaxHp(); return { hp: h, maxHp: h, wagonHp: w, wagonMax: w }; }
-// the wagon is destroyed — feedback burst + shout (the hero is now exposed)
-function wagonBreak(){
-  SFX.play('wagon');
-  const g = wagonGeom();
-  for (let k = 0; k < 16; k++) burst(g.cx, g.deckY, '#caa46a');
-  popup(g.cx, g.deckY - 30 * S(), 'WAGON DOWN!', '#ffb142');
+function newCastle(){
+  const h = Meta.heroMaxHp(), w = Meta.wagonMaxHp(), n = wagonEtage() + 1, per = w / n;
+  const decks = []; for (let d = 0; d < n; d++) decks.push({ hp: per, max: per, dead: false, boomT: null });
+  return { hp: h, maxHp: h, wagonHp: w, wagonMax: w, decks };
 }
+// a deck (étage) blows up — explosion+dust fire from its anchor, its weapons go offline.
+function deckBreak(i){
+  SFX.play('wagon');
+  const g = wagonGeom(), a = WAGON_ANCHORS[i], p = g.spr(a[0], a[1]);
+  for (let k = 0; k < 12; k++) burst(p.x, p.y, '#caa46a');
+  const c = state.castle, allDown = c && c.decks && c.decks.every(d => d.dead);
+  popup(p.x, p.y - 20 * S(), allDown ? 'WAGON DOWN!' : 'DECK DOWN!', allDown ? '#ffb142' : '#ffce54');
+}
+function wagonBreak(){ deckBreak(wagonEtage()); }   // legacy single-shield fallback
 // LAYERED DEFENCE: forces (allies) block enemies first; what gets through is soaked by the
-// wagon shield; only overflow reaches the hero — and the hero is the last line, so the run
-// ends the moment the hero's HP hits 0.
+// wagon — damage eats the TOP étage first, then works down. Only overflow past the last
+// deck reaches the hero core — the hero is the last line, so the run ends at hero HP 0.
 function hitConvoy(dmg){
   const c = state.castle; if (!c) return;
   let d = dmg;
-  if (c.wagonHp > 0){
+  if (c.decks && c.decks.length){
+    for (let i = c.decks.length - 1; i >= 0 && d > 0; i--){
+      const dk = c.decks[i]; if (dk.dead) continue;
+      const soak = Math.min(dk.hp, d); dk.hp -= soak; d -= soak; c.wagonHp -= soak;
+      if (dk.hp <= 0){ dk.hp = 0; dk.dead = true; dk.boomT = state.t; deckBreak(i); }
+    }
+    if (c.wagonHp < 0) c.wagonHp = 0;
+  } else if (c.wagonHp > 0){
     const soak = Math.min(c.wagonHp, d); c.wagonHp -= soak; d -= soak;
     if (c.wagonHp <= 0){ c.wagonHp = 0; wagonBreak(); }
   }
@@ -433,6 +675,7 @@ function startRun(){
   const bank = Meta.energy || 0;
   if (bank){ Meta.energy = 0; Meta.save(); }
   Object.assign(state, { energy: bank, score: 0, paused: false, over: false, won: false, level: lv,
+    ult: 0, ultReady: false, kills: 0,   // state.endless is set by the caller (startEndless=true, selectLevel=false) and preserved across a retry
     enemies: [], allies: [], shots: [], eshots: [], pops: [], parts: [], zones: [], props: [], bombs: [], plane: null, fxAcc: 0, frost: 0,
     boss: null, bossDead: false, bossT: 0, heroHurt: 0, heroDeadAt: 0,
     fort: null, fortDead: false, fortT: 0,
@@ -442,6 +685,7 @@ function startRun(){
     group: 1,                                                    // smooth difficulty (no wave cliffs); density comes from spawn rate
     interval: 1.60 - 0.09 * (lv - 1),                           // spawn gap → sparser early so a pistol keeps up (L1 1.60s … L10 0.79s)
     intervalFloor: 1.00 - 0.06 * (lv - 1) });                   // linear density ramp (L1 1.00 … L10 0.46); HP_MUL carries the level curve
+  if (state.endless){ state.endlessT = 0; state.hpMul0 = state.hpMul; state.dmgMul0 = state.dmgMul; }   // reset the ramp every endless run (incl. RETRY)
   state.castle = newCastle();
   state.wpn = Meta.weapons.map(() => ({ cd: 0, ang: -0.3, flash: 0 }));
   const rhero = HEROES[Meta.hero - 1] || HEROES[0];
@@ -460,11 +704,23 @@ function startRun(){
   refreshHud();
   refreshHp();
 }
+// ── ENDLESS / SURVIVAL MODE (post-campaign) ──────────────────────────────────
+// Unlocked once the final level is beaten. Uses the hardest scaling, no finish line and no
+// boss gate — the convoy rolls forever while difficulty ramps with time; the run ends only on
+// death. Score feeds the leaderboard + a personal best. Guarded so normal levels are untouched.
+function endlessUnlocked(){ return !!(Meta.stars && Meta.stars[LEVELS.length]); }
+function startEndless(){
+  if (!endlessUnlocked()){ show('levels'); return; }
+  Meta.level = LEVELS.length;                 // scale from the hardest campaign level
+  state.endless = true;
+  startRun();                                 // startRun resets the endless ramp baselines (endlessT/hpMul0)
+}
 function setEnergy(v){ const old = state.energy; state.energy = Math.max(0, Math.round(v)); refreshHud(); if (state.energy > old) bump($('g_energy')); }
 function addScore(v){ state.score += v; refreshHud(); bump($('g_score').parentElement); }
 
 /* ---------------- Special forces ---------------- */
 function deployForce(f){
+  if (!sfOwned(f.id)) return;                             // locked forces can't be deployed
   if (state.energy < f.cost) return;
   const lvl = sfLevel(f.id);
   if (f.kind === 'strike'){ setEnergy(state.energy - f.cost); airstrike(lvl); return; }   // airstrike: no cap
@@ -487,8 +743,10 @@ function spawnAlly(f, lvl){
   const col = slot % 2, row = (slot / 2) | 0;
   const x = Math.min(W - 40 * s, heroPos().x + (24 + col * 40 + row * 10) * s);   // combat anchor (front line)
   const y = groundY();
-  const vx = Math.max(30 * s, heroPos().x - (26 + col * 46 + row * 12) * s);      // visual: behind the hero
-  const vy = groundY() - (22 + row * 12) * s;                                     // visual: far lane (2.5D)
+  // visual: seat forces just behind/beside the hero, CLAMPED to ≤40% of the screen so they never
+  // drift out into the scene. Drawn after the hero (see render) so they're always visible.
+  const vx = Math.min(W * 0.40, Math.max(30 * s, heroPos().x - (18 + col * 22 + row * 8) * s));
+  const vy = groundY() - (14 + row * 13) * s;                                     // visual: slight far-lane stagger (2.5D) — rows step upward
   const evolved = lvl >= SF_EVOLVE && f.evo;                                          // past the threshold it becomes its upgraded hero
   const art = evolved ? f.evo : f.art;
   const dmg0 = evolved ? f.evoDmg : f.dmg, rate0 = evolved ? f.evoRate : f.rate, splash0 = evolved ? (f.evoSplash || 0) : (f.splash || 0);
@@ -647,11 +905,11 @@ function aimY(e){
   const h = (z ? z.dispH : 92) * s;
   return e.y - h * 0.55;
 }
-function fireShot(px, py, target, dmg, spd, splash){
+function fireShot(px, py, target, dmg, spd, splash, style){
   const ty = aimY(target);
   const dist = Math.hypot(target.x - px, ty - py), tt = dist / spd;
   const ax = target.x - (target.speed || 0) * tt, a = Math.atan2(ty - py, ax - px);
-  state.shots.push({ x: px, y: py, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, dmg, splash: splash || 0, life: 2.2 });
+  state.shots.push({ x: px, y: py, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, dmg, splash: splash || 0, life: 2.2, style: style || null });
   SFX.play('shoot');
   return a;
 }
@@ -675,6 +933,7 @@ function kill(e, reward){
   if (e.dead) return; e.dead = true;
   if (e.boss){
     state.boss = null; state.bossDead = true;
+    missionEvent('boss', 1);
     const col = (window.MonsterArt && MonsterArt.ROSTER[e.mIdx] && MonsterArt.ROSTER[e.mIdx].color) || '#ffd24a';
     setEnergy(state.energy + 30); addScore(40);
     for (let k = 0; k < 28; k++) burst(e.x, e.y - 60 * S(), col);
@@ -688,11 +947,43 @@ function kill(e, reward){
     for (let k = 0; k < 30; k++) burst(e.x, e.y - 30 * S(), k % 2 ? '#caa46a' : '#8a929c');
     flash(); return;
   }
-  if (reward){ SFX.play('die'); addScore(REWARD); for (let k = 0; k < 8; k++) burst(e.x, e.y - 24 * S(), '#7bbf4a'); }
+  if (reward){ SFX.play('die'); addScore(REWARD); gainUltOnKill(); state.kills = (state.kills || 0) + 1; for (let k = 0; k < 8; k++) burst(e.x, e.y - 24 * S(), '#7bbf4a'); }
 }
 function popup(x, y, txt, color){ state.pops.push({ x, y, vy: -52 * S(), life: 0.7, txt, color }); }
 function burst(x, y, color){ const s = S(); state.parts.push({ x, y, vx: (Math.random()-0.5)*220*s, vy: -Math.random()*220*s, life: 0.5, color, size: (2+Math.random()*3)*s }); }
 function flash(){ const f = $('flash'); f.classList.remove('go'); void f.offsetWidth; f.classList.add('go'); }
+
+// ── HERO ULTIMATE ────────────────────────────────────────────────────────────
+// A signature screen-clear that charges over time (faster when you kill), tinted by the
+// equipped hero's bullet colour. Big AoE damage + freeze survivors + heal the convoy core.
+const ULT_CHARGE_SEC = 24;                                // fills over ~24 s of combat…
+const ULT_KILL_GAIN  = 0.02;                             // …plus a bump per kill (aggressive play charges faster)
+function chargeUlt(dt){
+  if (state.ultReady || state.over) return;
+  state.ult = Math.min(1, state.ult + dt / ULT_CHARGE_SEC);
+  if (state.ult >= 1){ state.ult = 1; state.ultReady = true; SFX.play('chest'); }
+}
+function gainUltOnKill(){ if (!state.ultReady){ state.ult = Math.min(1, state.ult + ULT_KILL_GAIN); if (state.ult >= 1){ state.ult = 1; state.ultReady = true; } } }
+function refreshUltBtn(){
+  const b = $('ultBtn'); if (!b) return;
+  b.style.display = (state.screen === 'game' && !state.over) ? '' : 'none';
+  b.classList.toggle('ready', !!state.ultReady);
+  b.style.setProperty('--fill', Math.round((state.ult || 0) * 100) + '%');
+}
+function fireUltimate(){
+  if (!state.ultReady || state.over || state.paused) return;
+  state.ultReady = false; state.ult = 0; refreshUltBtn();
+  missionEvent('ult', 1);
+  const hero = HEROES[Meta.hero - 1] || HEROES[0];
+  const bs = heroBullet(hero), col = bs.glow || bs.trail || '#ffd24a';
+  const dmg = heroDmg(hero) * 6 + 120;                    // hero-scaled screen-clear
+  flash(); SFX.play('strike');
+  for (const e of state.enemies){ if (e.dead) continue; hurt(e, e.boss ? dmg * 0.8 : dmg, col); }   // hits the boss too, at 80%
+  state.frost = Math.max(state.frost, 2.4);               // freeze whoever survives
+  if (state.castle){ const c = state.castle; c.hp = Math.min(c.maxHp, c.hp + c.maxHp * 0.25); refreshHp(); }   // heal the core
+  for (let k = 0; k < 30; k++) burst(W * (0.2 + Math.random() * 0.6), groundY() - Math.random() * 160 * S(), col);
+  popup(heroPos().x, groundY() - 120 * S(), (hero.name || 'HERO') + ' ULTIMATE!', col);
+}
 /* ---------------- Results & rewards (Victory / Defeat popups + reward chests) ----------------
    Ported from the Claude Design "Monetization and Meta" batch. End-of-battle shows a Victory or
    Defeat card with a "COLLECT ×2" rewarded-ad option; clearing a level and every 4th game played
@@ -719,23 +1010,6 @@ function lerpHex(a, b, t){
   const g = Math.round(((A >> 8) & 255) + ((((B >> 8) & 255) - ((A >> 8) & 255)) * t));
   const bl = Math.round((A & 255) + (((B & 255) - (A & 255)) * t));
   return `rgb(${r},${g},${bl})`;
-}
-// menu wagon icon — armor plating / bolts / fenders / gold trim grow with the tier (0..WAGON_MAX)
-function wagonSvg(stg){
-  const m = stg / WAGON_MAX;
-  const deck = lerpHex('#8a6a4a', '#6b7886', m), deckHi = lerpHex('#a07e58', '#9aa7b6', m);
-  const hub = stg >= 5 ? '#ffd24a' : '#6a6d72';
-  let s = '<svg width="104" height="62" viewBox="0 0 120 72">';
-  s += `<rect x="14" y="26" width="92" height="20" rx="5" fill="${deck}" stroke="#0a1a38" stroke-width="4"/>`;
-  s += `<rect x="14" y="22" width="92" height="8" rx="3" fill="${deckHi}" stroke="#0a1a38" stroke-width="3"/>`;
-  s += `<rect x="22" y="12" width="22" height="16" rx="3" fill="${lerpHex('#5a4636', '#3a434f', m)}" stroke="#0a1a38" stroke-width="3"/>`;
-  if (stg >= 2){ s += `<rect x="20" y="31" width="80" height="11" rx="3" fill="${lerpHex('#6e5742', '#5a6675', m)}" stroke="#0a1a38" stroke-width="2.5"/>`;
-    for (let i = 0; i < 5; i++) s += `<circle cx="${28 + i * 16}" cy="36.5" r="1.7" fill="${stg >= 6 ? '#ffe49a' : '#1a222c'}"/>`; }
-  if (stg >= 4){ s += `<rect x="22" y="44" width="34" height="6" rx="3" fill="${lerpHex('#4a5666', '#39424e', m)}"/><rect x="64" y="44" width="34" height="6" rx="3" fill="${lerpHex('#4a5666', '#39424e', m)}"/>`; }
-  if (stg >= 6) s += '<rect x="14" y="22" width="92" height="2.4" rx="1" fill="#ffd24a"/>';
-  s += `<circle cx="38" cy="54" r="12" fill="#16161a" stroke="#0a1a38" stroke-width="4"/><circle cx="38" cy="54" r="4.5" fill="${hub}"/>`;
-  s += `<circle cx="84" cy="54" r="12" fill="#16161a" stroke="#0a1a38" stroke-width="4"/><circle cx="84" cy="54" r="4.5" fill="${hub}"/>`;
-  return s + '</svg>';
 }
 
 let pendingRewards = [];
@@ -808,6 +1082,27 @@ function queueLevelReward(level, advanced){
 // count the game played; every 4th, queue a play-streak bonus chest
 function tallyGameAndStreak(){
   Meta.games = (Meta.games || 0) + 1;
+  // hero mastery (played this battle) + daily-mission progress (win + kills accrued this run)
+  if (!window.__sim){
+    const eqH = HEROES[Meta.hero - 1]; if (eqH) addHeroMastery(eqH.id, (state && state.won) ? 2 : 1);
+    missionEvent('play', 1);
+    if (state && state.won) missionEvent('win', 1);
+    missionEvent('kill', state ? (state.kills || 0) : 0);
+    // global leaderboard: track best single-run score, push it up if the player has a nickname
+    const sc = state ? (state.score | 0) : 0;
+    if (sc > (Meta.bestScore | 0)) Meta.bestScore = sc;
+    if (Meta.name && window.TDSLeaderboard && TDSLeaderboard.ready) TDSLeaderboard.submit(Meta.name, Meta.bestScore);
+  }
+  // Play Games Services: submit the run to the leaderboards + unlock milestone achievements
+  // (Android only; a harmless no-op on web / before sign-in — see TDSGames in native.js).
+  if (!window.__sim && window.TDSGames && window.TDSGames.ready){
+    window.TDSGames.submitScore('highscore', state ? (state.score | 0) : 0);
+    window.TDSGames.submitScore('toplevel', Meta.unlocked | 0);
+    if (state && state.won) window.TDSGames.unlock('first_win');
+    if (Meta.unlocked >= 5)  window.TDSGames.unlock('level_5');
+    if (Meta.unlocked >= 10) window.TDSGames.unlock('level_10');
+    if ((Meta.games | 0) >= 25) window.TDSGames.unlock('veteran');
+  }
   if (Meta.games % 10 === 0) queueRating();     // nudge a 5★ rating every 10 battles
   if (Meta.games % 4 === 0){
     pendingRewards.push({
@@ -820,16 +1115,21 @@ function tallyGameAndStreak(){
 }
 // show one reward chest; CLAIM grants it then runs onClaim (→ next chest, or finish)
 function showRewardModal(r, onClaim){
-  SFX.play('chest');
+  SFX.play(r.hero ? 'win' : 'chest');
   $('rwTitle').textContent = r.title;
   $('rwTag').textContent = r.tag || '';
   $('rwDesc').textContent = r.desc || '';
-  $('rwIcon').innerHTML = r.icon || ICON_GIFT;
-  $('rwIcon').style.setProperty('--acc', r.accent || '#4a90e2');
+  const ico = $('rwIcon');
+  if (r.hero){                                                        // NEW HERO reveal — paint the hero portrait
+    ico.innerHTML = ''; ico.style.setProperty('--acc', r.accent || '#b15ce8');
+    paintHero(ico, r.hero, 'hero-png');
+  } else {
+    ico.innerHTML = r.icon || ICON_GIFT; ico.style.setProperty('--acc', r.accent || '#4a90e2');
+  }
   const g = $('rwGoodies'); g.innerHTML = '';
   if (r.coins) g.insertAdjacentHTML('beforeend', `<span class="rpill coin">${ICON_COIN}+${r.coins}</span>`);
   if (r.gems)  g.insertAdjacentHTML('beforeend', `<span class="rpill gem">${ICON_GEM}+${r.gems}</span>`);
-  const grant = (mult) => { SFX.play('coin'); Meta.coins += (r.coins || 0) * mult; Meta.gems += (r.gems || 0) * mult; Meta.save(); onClaim(); };
+  const grant = (mult) => { if (!r.hero) SFX.play('coin'); Meta.coins += (r.coins || 0) * mult; Meta.gems += (r.gems || 0) * mult; Meta.save(); onClaim(); };
   const claim = $('rwClaim'); claim.onclick = () => grant(1);
   const dbl = $('rwDouble');   // every reward can be doubled by watching an ad
   if (dbl){
@@ -874,6 +1174,8 @@ function proceed(action){
 function gameOver(){
   if (state.over) return;
   state.over = true; state.heroDeadAt = state.t;
+  refreshUltBtn();                              // hide the ultimate button on defeat
+  if (state.endless){ Meta.endlessBest = Math.max(Meta.endlessBest | 0, state.score | 0); Meta.save(); }   // record survival best
   // consolation coins are only CREDITED when the player leaves (retry/menu)
   state.coinReward = Math.round(state.score * levelCoinMul(state.level) * coinBoost()); state.doubled = false;
   if (!window.__sim && window.TDSAnalytics) TDSAnalytics.log('level_fail', { level: state.level, score: state.score, progress_pct: Math.min(100, Math.round(state.scroll / levelLen() * 100)) });
@@ -920,17 +1222,38 @@ function skipLevel(){
 function levelComplete(){
   if (state.over) return;
   state.over = true; state.won = true;
+  refreshUltBtn();                                 // hide the ultimate button on victory
+  const firstClear = !Meta.stars[state.level];    // no star recorded yet → this is the first-ever clear
   // victory purse ramps with level so later levels fund their pricier upgrades: L1 1000 … L5 4200 … L10 10450 — doublable via COLLECT ×2 ad
   const lt = state.level - 1;
-  const reward = Math.round((1000 + 600 * lt + 50 * lt * lt) * coinBoost()); Meta.coins += reward; state.coinReward = reward; state.doubled = false;
+  const reward = Math.round((1000 + 600 * lt + 50 * lt * lt) * coinBoost() * (firstClear ? 1 : REPLAY_COIN_MULT)); Meta.coins += reward; state.coinReward = reward; state.doubled = false;
   const hpFrac = state.castle ? (state.castle.hp + (state.castle.wagonHp || 0)) / (state.castle.maxHp + (state.castle.wagonMax || 0)) : 0;
   state.winStars = hpFrac > 0.66 ? 3 : hpFrac > 0.33 ? 2 : 1;
   Meta.stars[state.level] = Math.max(Meta.stars[state.level] || 0, state.winStars);   // best stars persist → level map
+  missionEvent('star', state.winStars);
   if (!window.__sim && window.TDSAnalytics) TDSAnalytics.log('level_complete', { level: state.level, stars: state.winStars, coins: reward });
   SFX.play('win');
   // clearing the frontier level unlocks the next one AND selects it, so PLAY continues the campaign
   const advanced = (state.level >= Meta.unlocked && Meta.unlocked < LEVELS.length);
   if (advanced){ Meta.unlocked++; Meta.level = Meta.unlocked; }
+  // CAMPAIGN HERO UNLOCK — the FIRST clear of a level grants the next hero (Battle Tank after the last).
+  if (firstClear){
+    const grantId = heroGrantedByClearing(state.level);
+    if (grantId && !heroOwned(grantId)){
+      Meta.heroesOwned.push(grantId);
+      const gh = HEROES.find(h => h.id === grantId);
+      if (gh) pendingRewards.push({ hero: gh, title: 'NEW HERO UNLOCKED', tag: (gh.rarity || '').toUpperCase(),
+        desc: `${gh.name} joined your squad! Equip it from the Heroes screen.`, accent: RARITY_COL[gh.rarity] || '#b15ce8', adDouble: false });
+    }
+  }
+  // STAR MASTERY TRACK — every STAR_MILESTONE total campaign stars grants a gem reward
+  { let totalStars = 0; for (const k in Meta.stars) totalStars += Meta.stars[k] | 0;
+    Meta.starClaimed = Meta.starClaimed | 0;
+    while (totalStars >= (Meta.starClaimed + 1) * STAR_MILESTONE){
+      Meta.starClaimed++;
+      pendingRewards.push({ icon: '⭐', title: 'STAR MILESTONE', tag: (Meta.starClaimed * STAR_MILESTONE) + ' STARS', desc: 'Campaign mastery reward!', gems: STAR_REWARD_GEMS, accent: '#ffd24a' });
+    }
+  }
   queueLevelReward(state.level, advanced);     // reward for the level achieved
   tallyGameAndStreak();                        // also counts toward the every-4-games chest
   queueRating();                               // nudge a 5★ rating after clearing a level
@@ -955,10 +1278,19 @@ function roadBlocked(){
 }
 function update(dt){
   const s = S(), front = frontLine();
+  chargeUlt(dt); refreshUltBtn();                         // hero ultimate charge + HUD meter
+  // ENDLESS: ramp difficulty with time; new spawns get tougher (+100% every 45s)
+  if (state.endless){
+    state.endlessT = (state.endlessT || 0) + dt;
+    const k = 1 + state.endlessT / 45;
+    state.hpMul = (state.hpMul0 || state.hpMul) * k;
+    state.dmgMul = (state.dmgMul0 || state.dmgMul) * k;
+  }
   // advance the world; reaching the finish line completes the level
   // advance toward the level's end; at the finish line the level BOSS appears (beat it to win)
-  const bossLine = levelLen() - heroPos().x;
-  const midLine = levelLen() * 0.5 - heroPos().x;
+  // ENDLESS has no finish line / boss gate → the convoy rolls forever.
+  const bossLine = state.endless ? Infinity : levelLen() - heroPos().x;
+  const midLine = state.endless ? Infinity : levelLen() * 0.5 - heroPos().x;
   // the convoy halts at the mid-level fort until it's razed, then advances to the boss line
   const cap = state.fortDead ? bossLine : midLine;
   if (state.scroll < cap && !roadBlocked()) state.scroll += SCROLL_SPD * s * dt;
@@ -990,12 +1322,13 @@ function update(dt){
   Meta.weapons.forEach((wid, i) => {
     const w = WEAPONS[wid - 1], m = mounts[i], st = state.wpn[i];
     if (!w || !m || !st) return;
+    if (m.deck != null && state.castle && state.castle.decks && state.castle.decks[m.deck] && state.castle.decks[m.deck].dead) return;   // a destroyed deck's weapons stop firing
     st.cd -= dt; if (st.flash > 0) st.flash -= dt;
     const t = nearestEnemy(m.x, m.y, w.range * W);
     if (t) st.ang = Math.atan2(t.y - m.y, t.x - m.x);
     if (t && st.cd <= 0){
       const lvl = Meta.wlv[wid - 1] || 1;
-      const dmg = w.dmg * (1 + 0.22 * (lvl - 1)) * Meta.dmgMult();
+      const dmg = w.dmg * (1 + 0.22 * (lvl - 1)) * Meta.dmgMult() * Meta.wagonDmgMult();
       st.cd = 1 / (w.rate * (1 + 0.05 * (lvl - 1)));
       fireShot(m.x, m.y, t, dmg, w.spd, w.splash * s);
       st.flash = 0.06;
@@ -1010,7 +1343,7 @@ function update(dt){
     state.heroAng = Math.atan2((hp_.y - 44 * hcs) - ht.y, ht.x - hp_.x);
     if (state.heroCd <= 0){
       if (hero.tank){ state.heroCd = TANK_RELOAD; fireTankCannon(ht); }
-      else { state.heroCd = 1 / (hero.rate || 2); fireShot(hp_.x + 28 * hcs, hp_.y - 78 * hcs, ht, heroDmg(hero), hero.spd || 950, (hero.splash || 0) * s); state.heroFire = 0.12; }
+      else { state.heroCd = 1 / (hero.rate || 2); fireShot(hp_.x + 28 * hcs, hp_.y - 78 * hcs, ht, heroDmg(hero), hero.spd || 950, (hero.splash || 0) * s, heroBullet(hero)); state.heroFire = 0.12; }
     }
   }
 
@@ -1279,77 +1612,48 @@ function weaponImage(w, lvl){
   }
   return wpnImgCache[k];
 }
-// ---- convoy wagon (flatbed on wheels) ----
-function drawWagonWheel(x, y, r, hub){
-  const s = S();
-  ctx.fillStyle = '#16161a'; ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fill();
-  ctx.fillStyle = '#3a3d42'; ctx.beginPath(); ctx.arc(x, y, r * 0.52, 0, 7); ctx.fill();
-  ctx.save(); ctx.translate(x, y); ctx.rotate(state.scroll / r);   // wheels roll with the advance
-  ctx.strokeStyle = '#23262c'; ctx.lineWidth = 3 * s;
-  for (let k = 0; k < 6; k++){ const a = k * Math.PI / 3; ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(a) * r * 0.76, Math.sin(a) * r * 0.76); ctx.stroke(); }
-  ctx.restore();
-  ctx.fillStyle = hub || '#6a6d72'; ctx.beginPath(); ctx.arc(x, y, r * 0.2, 0, 7); ctx.fill();
-}
-function drawWagonBase(){
-  const { s, cx, w, deckY } = wagonGeom(), by = groundY();
-  // wagon tier (Meta.wagon 0..WAGON_MAX) ramps the cosmetics wood → reinforced steel
-  const stg = Meta.wagon, m = stg / WAGON_MAX;
-  const deck = lerpHex('#8a6a4a', '#6b7886', m), deckHi = lerpHex('#a07e58', '#9aa7b6', m);
-  const chTopC = lerpHex('#6b4f33', '#4a5666', m), chBotC = lerpHex('#46321f', '#2a3038', m);
-  const post = lerpHex('#5a4636', '#3a434f', m), hub = stg >= 5 ? '#ffd24a' : '#6a6d72';
-  ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); ctx.ellipse(cx, by + 6 * s, w * 0.52, 10 * s, 0, 0, 7); ctx.fill();
-  const r = (16 + stg * 0.6) * s, cyW = by;                       // wheels thicken slightly with tier
-  drawWagonWheel(cx - w * 0.31, cyW, r, hub); drawWagonWheel(cx + w * 0.31, cyW, r, hub);
-  // chassis below the deck
-  const chTop = deckY + 4 * s, chBot = by - 6 * s;
-  const g = ctx.createLinearGradient(0, chTop, 0, chBot); g.addColorStop(0, chTopC); g.addColorStop(1, chBotC);
-  ctx.fillStyle = g; rr(cx - w / 2, chTop, w, chBot - chTop, 6 * s); ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.lineWidth = 2 * s;
-  for (let i = 1; i < 4; i++){ const px = cx - w / 2 + (w / 4) * i; ctx.beginPath(); ctx.moveTo(px, chTop + 3 * s); ctx.lineTo(px, chBot - 3 * s); ctx.stroke(); }
-  // tier ≥2: bolted armor band across the chassis side
-  if (stg >= 2){
-    const ay = chTop + (chBot - chTop) * 0.28, ah = (chBot - chTop) * 0.5;
-    ctx.fillStyle = lerpHex('#6e5742', '#5a6675', m); rr(cx - w / 2 + 5 * s, ay, w - 10 * s, ah, 4 * s); ctx.fill();
-    ctx.fillStyle = stg >= 6 ? '#ffe49a' : 'rgba(18,24,32,.85)';
-    const n = 6; for (let i = 0; i < n; i++){ const px = cx - w / 2 + 13 * s + (w - 26 * s) * (i / (n - 1)); ctx.beginPath(); ctx.arc(px, ay + ah / 2, 1.9 * s, 0, 7); ctx.fill(); }
-  }
-  // tier ≥4: armored fenders over the wheels
-  if (stg >= 4){
-    ctx.fillStyle = lerpHex('#4a5666', '#39424e', m);
-    for (const wx of [cx - w * 0.31, cx + w * 0.31]){ rr(wx - r - 2 * s, by - r - 5 * s, (r + 2 * s) * 2, 7 * s, 3 * s); ctx.fill(); }
-  }
-  // deck board — its TOP edge is the surface weapons stand on (deckY) — geometry unchanged
-  ctx.fillStyle = deck; rr(cx - w / 2 - 3 * s, deckY, w + 6 * s, 11 * s, 3 * s); ctx.fill();
-  ctx.fillStyle = deckHi; rr(cx - w / 2 - 3 * s, deckY, w + 6 * s, 3 * s, 2 * s); ctx.fill();
-  if (stg >= 6){ ctx.fillStyle = '#ffd24a'; rr(cx - w / 2 - 3 * s, deckY, w + 6 * s, 1.8 * s, 1 * s); ctx.fill(); }   // gold trim at max tier
-  // low end posts
-  ctx.fillStyle = post; rr(cx - w / 2 - 3 * s, deckY - 13 * s, 7 * s, 13 * s, 2 * s); ctx.fill(); rr(cx + w / 2 - 4 * s, deckY - 13 * s, 7 * s, 13 * s, 2 * s); ctx.fill();
-}
-// the tower built on the deck that carries weapon 1 up high — a stout turret with a wide platform
-function drawTower(){
-  const { s, deckY } = wagonGeom(), tx = towerX(), tw = 56 * s, top = towerTop();
-  // trapezoid column, wider at the base
-  const baseHalf = tw / 2 + 8 * s, topHalf = tw / 2;
-  ctx.beginPath();
-  ctx.moveTo(tx - baseHalf, deckY); ctx.lineTo(tx - topHalf, top + 8 * s);
-  ctx.lineTo(tx + topHalf, top + 8 * s); ctx.lineTo(tx + baseHalf, deckY); ctx.closePath();
-  const g = ctx.createLinearGradient(tx - baseHalf, 0, tx + baseHalf, 0);
-  g.addColorStop(0, '#7a5e44'); g.addColorStop(0.5, '#5a4226'); g.addColorStop(1, '#3c2a18');
-  ctx.fillStyle = g; ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 2 * s; ctx.stroke();
-  // platform: its TOP edge is at `top` (the weapon's standing surface)
-  const phalf = tw / 2 + 16 * s;
-  ctx.fillStyle = '#8a6a4a'; rr(tx - phalf, top, phalf * 2, 11 * s, 3 * s); ctx.fill();
-  ctx.fillStyle = '#a07e58'; rr(tx - phalf, top, phalf * 2, 3 * s, 2 * s); ctx.fill();
-  // corner posts framing the platform
-  ctx.fillStyle = '#5a4636'; rr(tx - phalf, top - 7 * s, 8 * s, 9 * s, 2 * s); ctx.fill(); rr(tx + phalf - 8 * s, top - 7 * s, 8 * s, 9 * s, 2 * s); ctx.fill();
-}
 // draw the whole convoy: wagon, tower, both weapons seated on their surfaces
 function drawConvoy(){
-  const m = weaponMounts(), w0 = Meta.weapons[0], w1 = Meta.weapons[1], s = CS();
-  drawWagonBase();
-  if (w1){ drawTower(); drawWeaponTurret(m[1], WEAPONS[w1 - 1], state.wpn[1] || {}, Meta.wlv[w1 - 1] || 1, 52 * s, 36 * s); }
-  if (w0){ drawWeaponTurret(m[0], WEAPONS[w0 - 1], state.wpn[0] || {}, Meta.wlv[w0 - 1] || 1, 74 * s, 42 * s); }
+  const g = wagonGeom(), et = wagonEtage(), c = state.castle;
+  const decks = c && c.decks ? c.decks : null;
+  const nDead = decks ? decks.filter(d => d.dead).length : 0;
+  const frac  = c ? c.wagonHp / (c.wagonMax || 1) : 1;
+  // damage state → which sprite: all decks gone = destroyed; any gone / <60% = damaged
+  let ds = 'intact';
+  if (nDead >= et + 1 || frac <= 0) ds = 'destroyed';
+  else if (nDead > 0 || frac < 0.6) ds = 'damaged';
+  const im = IMG['wagon_s' + (et + 1) + '_' + ds];
+  if (im && im.naturalWidth) ctx.drawImage(im, g.leftX, g.topY, WAGON_SPR.W * g.scale, WAGON_SPR.H * g.scale);
+  else {                                                                       // fallback: a plain cart body so guns/wheels never float if the sprite fails to load
+    const bx = g.leftX + 96 * g.scale, bw = 320 * g.scale, byT = g.topY + 300 * g.scale, bh = (200 + et * 100) * g.scale;
+    ctx.fillStyle = '#6b4f33'; rr(bx, byT - (et * 100) * g.scale, bw, bh, 12 * g.scale); ctx.fill();
+    ctx.fillStyle = '#8a6a4a'; rr(bx, byT - (et * 100) * g.scale, bw, 10 * g.scale, 6 * g.scale); ctx.fill();
+  }
+  drawWagonWheels(g);                                                          // spinning wheels over the baked-in ones
+  // per-deck effects: burning while damaged, explosion+dust on death, smoke from rubble
+  if (decks) for (let d = 0; d < decks.length; d++){
+    const dk = decks[d], a = g.spr(WAGON_ANCHORS[d][0], WAGON_ANCHORS[d][1]);
+    const bot = g.spr(WAGON_ANCHORS[d][0], WAGON_DECK_BOT[d]);
+    if (dk.dead){
+      if (dk.boomT != null){ drawFxSheet('explosion', a.x, a.y, g.scale * 1.3, dk.boomT, 'center'); drawFxSheet('dust', bot.x, bot.y, g.scale * 1.2, dk.boomT, 'bottom'); }
+      drawFxSheet('smoke', a.x, a.y, g.scale, 0, 'bottom');                    // rubble keeps smoking
+    } else if (dk.hp < dk.max * 0.5){
+      drawFxSheet('fire',  a.x, a.y, g.scale * 0.9, 0, 'bottom');
+      drawFxSheet('smoke', a.x, a.y, g.scale * 0.8, 0, 'bottom');
+    }
+  }
+  // mounted weapons — seated on their hardpoints, sized to each deck's hardpoint spacing so
+  // upper decks (closer hardpoints) get smaller guns that never overlap. Skip destroyed decks.
+  const pts = WAGON_HP_PTS[et];
+  weaponMounts().forEach((m, i) => {
+    const wid = Meta.weapons[i]; if (!wid) return;
+    if (decks && decks[m.deck] && decks[m.deck].dead) return;
+    let gap = 220;                                                             // px to the nearest same-deck hardpoint (sprite space)
+    for (let j = 0; j < pts.length; j++) if (j !== i && pts[j][2] === pts[i][2]) gap = Math.min(gap, Math.abs(pts[j][0] - pts[i][0]));
+    const cap = pts[i][3] || 130;                                             // per-hardpoint size cap (side/upper guns are smaller)
+    const ww = Math.min(cap, gap * 0.95) * g.scale;                          // cap the size, then fit to spacing (looser fit → bigger, clearer guns)
+    drawWeaponTurret(m, WEAPONS[wid - 1], state.wpn[i] || {}, Meta.wlv[wid - 1] || 1, ww, ww * 0.74);
+  });
 }
 // draw a weapon so its real pixels are seated bottom-centre on the mount surface (m.x, m.y)
 function drawWeaponTurret(m, w, st, lvl, maxW, targetH){
@@ -1488,12 +1792,15 @@ function drawAlly(a){
 function drawShots(){
   const s = S();
   for (const b of state.shots){
+    const st = b.style || BULLETS.bolt;                                     // per-hero bullet look (default for weapons/allies)
     const px = b.px != null ? b.px : b.x, py = b.py != null ? b.py : b.y;   // streak spans this frame's travel → fast shots read as one continuous tracer
+    if (st.glow){ ctx.shadowColor = st.glow; ctx.shadowBlur = 9 * s; }       // energy/fire bullets glow
     const g = ctx.createLinearGradient(px, py, b.x, b.y);
-    g.addColorStop(0, 'rgba(255,200,50,0)'); g.addColorStop(1, '#ffe07a');
-    ctx.strokeStyle = g; ctx.lineWidth = 5.5 * s; ctx.lineCap = 'round';
+    g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(1, st.trail);
+    ctx.strokeStyle = g; ctx.lineWidth = st.w * s; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(b.x, b.y); ctx.stroke();
-    ctx.fillStyle = '#fff6d0'; ctx.beginPath(); ctx.arc(b.x, b.y, 3.4 * s, 0, 7); ctx.fill();   // bright bullet head
+    ctx.fillStyle = st.core; ctx.beginPath(); ctx.arc(b.x, b.y, st.r * s, 0, 7); ctx.fill();   // bright bullet head
+    ctx.shadowBlur = 0;
   }
 }
 // falling airstrike bombs — black shells with fins, slight tilt
@@ -1758,14 +2065,16 @@ function render(){
   drawGround(by);
   // the castle we set out from scrolls away to the left behind the convoy
   if (castleDims().w - state.scroll > -20){ ctx.save(); ctx.translate(-state.scroll, 0); drawCastle(by); ctx.restore(); }
-  if (!state.boss && !state.bossDead) drawFinish(by);                  // the boss replaces the finish gate
+  if (!state.endless && !state.boss && !state.bossDead) drawFinish(by);   // no finish gate in endless; the boss replaces it otherwise
   drawProps(by);                                                       // razed-fort rubble etc. (world-anchored)
-  for (const a of [...state.allies].sort((p, q) => p.y - q.y)) drawAlly(a);   // far lane: forces render BEHIND the convoy (2.5D)
   const wreck = state.over && !state.won;                              // defeat: the convoy renders as a burnt-out wreck
   if (wreck) ctx.filter = 'grayscale(0.7) brightness(0.55)';
   drawConvoy();
-  drawHero();
-  if (wreck) ctx.filter = 'none';
+  drawHero();                                                          // convoy + hero share the wreck tint
+  if (wreck) ctx.filter = 'none';                                      // living allies are NOT part of the wreck tint
+  // forces render AFTER the hero so it never hides them — but kept within the left 40% of the
+  // screen (see spawnAlly vx clamp) so they cluster just behind/beside the hero, not mid-scene.
+  for (const a of [...state.allies].sort((p, q) => p.y - q.y)) drawAlly(a);
   for (const e of state.enemies) drawZombie(e);
   drawShots(); drawBombs(); drawPlane(); drawEnemyShots(); drawPopups(); drawFrostOverlay();
   if (state.bossT > 0) drawBossBanner();
@@ -1794,6 +2103,7 @@ function buildSfBar(){
   const bar = $('sfBar'); if (!bar) return;
   bar.innerHTML = ''; sfButtons = [];
   for (const f of FORCES){
+    if (!sfOwned(f.id)) continue;                          // only deployable (owned) forces show in the battle bar
     const b = document.createElement('button');
     b.className = 'sf' + (f.kind === 'strike' ? ' strike' : '');
     const nm = (f.evo && sfLevel(f.id) >= SF_EVOLVE) ? f.evoName : f.name;
@@ -1822,6 +2132,7 @@ function refreshHud(){
   $('g_energy').textContent = state.energy;
   $('g_score').textContent = state.score;
   $('progFill').style.width = Math.min(100, state.scroll / levelLen() * 100) + '%';
+  refreshUltBtn();
   for (const { b, f } of sfButtons) b.disabled = state.energy < f.cost;
   // first-time: once the player can afford a force, point at the forces bar until they deploy
   const fd = $('ftueDeploy'); if (fd) fd.style.display = (!(Meta.ftue & 2) && !state.over && state.energy >= FORCES[0].cost) ? '' : 'none';
@@ -1836,7 +2147,7 @@ function refreshMenu(){
   $('m_coins').textContent = Meta.coins; $('m_gems').textContent = Meta.gems;
   const lv = LEVELS[Meta.level - 1] || LEVELS[0];
   $('m_levelno').textContent = lv.id; $('m_levelname').textContent = lv.name;
-  renderCastle(); refreshCastleUpg(); refreshLoadout(); refreshHeroLoadout(); refreshSndUi();
+  renderCastle(); refreshCastleUpg(); refreshLoadout(); refreshHeroLoadout(); refreshSndUi(); refreshMissionDot();
   regenTickets(); refreshTikUi();
   const sn = $('streakN'); if (sn) sn.textContent = streakNext();
   const sb = $('toStreak'); if (sb) sb.classList.toggle('ready', streakClaimable());
@@ -2060,11 +2371,11 @@ function buildFreeTab(body){
     owned: Meta.pticket >= PT_MAX, ownedLabel: 'FULL', priceHtml: '▶ +1', onBuy: () => playRewardedAd(() => { grantTicket(1); refreshShop(); }) }));
 }
 function buildPowerTab(body){
-  body.appendChild(shopHead('Unlock a hero · 💎'));
-  const featured = HEROES.find(h => !heroOwned(h.id));
-  if (featured) body.appendChild(shopCard({ icon: featured.tank ? '🚜' : '🦸', name: featured.name, desc: `${featured.rarity} hero · unlock to equip`, badge: 'HERO', accent: RARITY_COL[featured.rarity] || '#b15ce8', priceHtml: `${ICON_GEM}${heroUnlockCost(featured)}`,
-    afford: Meta.gems >= heroUnlockCost(featured), onBuy: () => { unlockHero(featured.id, 'gems'); refreshShop(); } }));
-  else body.appendChild(shopCard({ icon: '🦸', name: 'ALL HEROES OWNED', desc: 'You unlocked every hero!', accent: '#7cd84e', owned: true, ownedLabel: '✓ DONE' }));
+  // Heroes are EARNED by clearing levels — show the next one as a locked carrot (not for sale).
+  const nh = nextLockedHero();
+  body.appendChild(shopHead('Next hero · earn by playing'));
+  if (nh) body.appendChild(shopCard({ icon: '🔒', name: nh.name, desc: `${nh.rarity} hero · clear Level ${heroUnlockLevel(nh.id)} to unlock`, badge: 'HERO', accent: RARITY_COL[nh.rarity] || '#b15ce8', owned: true, ownedLabel: `▶ LEVEL ${heroUnlockLevel(nh.id)}` }));
+  else body.appendChild(shopCard({ icon: '🦸', name: 'ALL HEROES UNLOCKED', desc: 'You earned every hero!', accent: '#7cd84e', owned: true, ownedLabel: '✓ DONE' }));
   body.appendChild(shopHead('Instant upgrades · 💎'));
   const wMaxed = Meta.weapons.every(id => (Meta.wlv[id - 1] || 1) >= WEAPON_MAX);
   const hEq = HEROES[Meta.hero - 1] || HEROES[0];
@@ -2073,15 +2384,41 @@ function buildPowerTab(body){
   body.appendChild(shopCard({ icon: '🦸', name: 'HERO LEVELS', desc: '+3 levels to your hero', accent: '#7cd84e', owned: hMaxed, ownedLabel: 'MAX', priceHtml: `${ICON_GEM}${heroBoostGems()}`, afford: Meta.gems >= heroBoostGems(), onBuy: () => gemUpgrade('hero') }));
   body.appendChild(shopCard({ icon: '🏰', name: 'CASTLE STAGE', desc: 'Instantly +1 castle stage', accent: '#7cd84e', owned: Meta.castle >= CASTLE_MAX, ownedLabel: 'MAX', priceHtml: `${ICON_GEM}${castleGems()}`, afford: Meta.gems >= castleGems(), onBuy: () => gemUpgrade('castle') }));
 }
+// ── IN-APP PURCHASES (real money · Google Play Billing via CdvPurchase) ──────────
+// Paste the product IDs you create in the Play Console into `id`. Until then, on Android these
+// buttons do nothing (never grant for free); in the browser build they simulate the grant so the
+// shop stays testable. The grant logic lives here (it owns Meta); iap.js only drives the store.
+const IAP = [
+  { key: 'gems1', id: '100gems',   type: 'consumable',     gems: 100 },   // $1.99
+  { key: 'gems2', id: '700gems',   type: 'consumable',     gems: 700 },   // $4.99
+  { key: 'gems3', id: '1600gems',  type: 'consumable',     gems: 1600 },  // $9.99
+  { key: 'mega',  id: 'megachest', type: 'consumable',     special: 'mega' },   // $2.99
+  { key: 'noads', id: 'roads',     type: 'non-consumable', special: 'noads' },  // $4.99  ⚠️ verify this ID (looks like a typo for "noads")
+];
+function grantIap(pr){
+  if (!pr) return;
+  if (pr.special === 'mega'){
+    showRewardModal({ icon: ICON_CHEST, accent: '#F4B731', title: 'MEGA CHEST', tag: 'JACKPOT', desc: 'Huge haul!', coins: randInt(6000, 11000), gems: randInt(40, 80), adDouble: false },
+      () => { $('rewardModal').classList.remove('active'); refreshShop(); refreshMenu(); });
+    return;
+  }
+  if (pr.special === 'noads'){ Meta.noAds = true; Meta.gems += 300; }
+  else { Meta.gems += (pr.gems || 0); Meta.coins += (pr.coins || 0); }
+  SFX.play('coin'); Meta.save(); refreshShop(); refreshMenu();
+}
+function buyIap(key){ if (window.TDSIAP) TDSIAP.buy(key).catch(() => {}); }   // grant happens via grantIap on success
+// live localized price (e.g. "$1.99" / "€1,99") once the store loads, else the hard-coded fallback
+function iapPrice(key, fallback){ const pr = IAP.find(p => p.key === key); const live = pr && window.TDSIAP && TDSIAP.price(pr.id); return live || fallback; }
+if (window.TDSIAP) TDSIAP.configure(IAP, grantIap);
+
 function buildBoxesTab(body){
   body.appendChild(shopHead('Loot boxes'));
   const grid = document.createElement('div'); grid.className = 'chest-grid';
   grid.appendChild(chestTile('legendary')); grid.appendChild(chestTile('rare')); grid.appendChild(chestTile('common'));
   body.appendChild(grid);
   body.appendChild(shopHead('Mega deal'));
-  body.appendChild(shopCard({ icon: ICON_CHEST, name: 'MEGA CHEST', desc: '6000–11000 coins + 40–80 gems', badge: 'BEST', accent: '#F4B731', priceHtml: '$2.99',
-    onBuy: () => showRewardModal({ icon: ICON_CHEST, accent: '#F4B731', title: 'MEGA CHEST', tag: 'JACKPOT', desc: 'Huge haul!', coins: randInt(6000, 11000), gems: randInt(40, 80) },
-      () => { $('rewardModal').classList.remove('active'); refreshShop(); refreshMenu(); }) }));
+  body.appendChild(shopCard({ icon: ICON_CHEST, name: 'MEGA CHEST', desc: '6000–11000 coins + 40–80 gems', badge: 'BEST', accent: '#F4B731', priceHtml: iapPrice('mega', '$2.99'),
+    onBuy: () => buyIap('mega') }));
 }
 function buildCoinsTab(body){
   body.appendChild(shopHead('Buy coins with 💎'));
@@ -2097,12 +2434,12 @@ function buildCoinsTab(body){
 }
 function buildGemsTab(body){
   body.appendChild(shopHead('Get gems'));
-  const packs = [ { name: 'PILE OF GEMS', gems: 100, price: '$1.99' }, { name: 'SACK OF GEMS', gems: 700, price: '$4.99', badge: '+100 BONUS' }, { name: 'CHEST OF GEMS', gems: 1600, price: '$9.99', badge: 'BEST VALUE' } ];
-  for (const p of packs) body.appendChild(shopCard({ icon: '💎', name: p.name, desc: `${p.gems} gems`, badge: p.badge, accent: '#b15ce8', priceHtml: p.price,
-    onBuy: () => { Meta.gems += p.gems; Meta.save(); refreshShop(); refreshMenu(); } }));
+  const packs = [ { name: 'PILE OF GEMS', gems: 100, price: '$1.99', key: 'gems1' }, { name: 'SACK OF GEMS', gems: 700, price: '$4.99', badge: '+100 BONUS', key: 'gems2' }, { name: 'CHEST OF GEMS', gems: 1600, price: '$9.99', badge: 'BEST VALUE', key: 'gems3' } ];
+  for (const p of packs) body.appendChild(shopCard({ icon: '💎', name: p.name, desc: `${p.gems} gems`, badge: p.badge, accent: '#b15ce8', priceHtml: iapPrice(p.key, p.price),
+    onBuy: () => buyIap(p.key) }));
   body.appendChild(shopHead('Specials'));
-  body.appendChild(shopCard({ icon: '🚫', name: 'NO-ADS BUNDLE', desc: 'Remove forced ads + 300 💎', badge: 'VALUE', accent: '#ffd24a', owned: Meta.noAds, ownedLabel: 'OWNED', priceHtml: '$4.99',
-    onBuy: () => { Meta.noAds = true; Meta.gems += 300; Meta.save(); refreshShop(); refreshMenu(); } }));
+  body.appendChild(shopCard({ icon: '🚫', name: 'NO-ADS BUNDLE', desc: 'Remove forced ads + 300 💎', badge: 'VALUE', accent: '#ffd24a', owned: Meta.noAds, ownedLabel: 'OWNED', priceHtml: iapPrice('noads', '$4.99'),
+    onBuy: () => buyIap('noads') }));
   body.appendChild(shopCard({ icon: '🎟️', name: 'SKIP TICKETS ×3', desc: `Skip a level you’re stuck on (use on the defeat card)${Meta.tickets ? ` · you have ${Meta.tickets}` : ''}`, accent: '#b15ce8', priceHtml: `${ICON_GEM}60`,
     afford: Meta.gems >= 60, onBuy: () => { if (Meta.gems < 60) return; Meta.gems -= 60; Meta.tickets = (Meta.tickets || 0) + 3; Meta.save(); refreshShop(); refreshMenu(); } }));
 }
@@ -2127,26 +2464,116 @@ function buildLevels(){
 }
 function refreshLevels(){
   $('lv_coins').textContent = Meta.coins;
+  refreshEndlessBtn();
   document.querySelectorAll('.level-node').forEach(btn => {
-    const id = +btn.dataset.level, L = LEVELS[id - 1];
+    const id = +btn.dataset.level, L = LEVELS[id - 1], boss = LEVEL_BOSS[id - 1] || {};
     const locked = id > Meta.unlocked, current = id === Meta.level && !locked;
     btn.classList.toggle('locked', locked); btn.classList.toggle('current', current); btn.disabled = locked;
+    // each level shows its END BOSS — a dim silhouette while locked, revealed once unlocked
+    const bossBadge = `<span class="ln-boss${locked ? ' silhouette' : ''}" title="${boss.name || ''}">${boss.emoji || '👹'}</span>`;
     if (locked){
-      btn.innerHTML = `<span class="ln-badge">🔒</span><span class="ln-info"><span class="ln-name">LEVEL ${id}</span><span class="ln-stars">LOCKED</span></span>`;
+      btn.innerHTML = `<span class="ln-badge">🔒</span><span class="ln-info"><span class="ln-name">LEVEL ${id}</span><span class="ln-stars">LOCKED · BOSS ???</span></span>${bossBadge}`;
     } else {
       const pw = playerPower(), need = reqPower(id), weak = pw < need;
       const st = Meta.stars[id] || 0;
       btn.innerHTML = `<span class="ln-badge">${id}</span><span class="ln-info"><span class="ln-name">${L.name}${st ? ` <i class="ln-best">${'★'.repeat(st)}${'☆'.repeat(3 - st)}</i>` : ''}</span>`
-        + `<span class="ln-stars" style="color:${weak ? '#ff7a7a' : '#8fe388'}">⚡ ${kfmt(pw)} / ${kfmt(need)}${weak ? '  ⬆ upgrade' : ''}</span></span><span class="ln-go">▶</span>`;
+        + `<span class="ln-stars" style="color:${weak ? '#ff7a7a' : '#8fe388'}">⚡ ${kfmt(pw)} / ${kfmt(need)} · 👑 ${boss.name}</span></span>${bossBadge}<span class="ln-go">▶</span>`;
     }
   });
 }
-function selectLevel(id){ if (id > Meta.unlocked) return; Meta.level = id; Meta.save(); refreshLevels(); startRun(); }
+function refreshEndlessBtn(){
+  const b = $('endlessBtn'); if (!b) return;
+  const on = endlessUnlocked();
+  b.style.display = on ? '' : 'none';
+  const best = $('endlessBest'); if (best) best.textContent = Meta.endlessBest ? `· BEST ${kfmt(Meta.endlessBest)}` : '';
+}
+function selectLevel(id){ if (id > Meta.unlocked) return; state.endless = false; Meta.level = id; Meta.save(); refreshLevels(); launchLevel(); }
+// gate the battle behind a one-time story intro card the FIRST time you enter a level
+function launchLevel(){
+  const id = Meta.level;
+  if (!Meta.storySeen[id] && LEVEL_STORY[id - 1]) showStory(id, () => { Meta.storySeen[id] = 1; Meta.save(); startRun(); });
+  else startRun();
+}
+function showStory(id, onBegin){
+  const modal = $('storyModal'); if (!modal){ onBegin(); return; }
+  const L = LEVELS[id - 1] || {}, boss = LEVEL_BOSS[id - 1] || {};
+  $('stLevel').textContent = 'LEVEL ' + id;
+  $('stName').textContent = L.name || '';
+  $('stText').textContent = LEVEL_STORY[id - 1] || '';
+  $('stBoss').textContent = boss.emoji ? (boss.emoji + '  BOSS: ' + boss.name) : '';
+  $('stBegin').onclick = () => { modal.classList.remove('active'); onBegin(); };
+  modal.classList.add('active');
+}
+
+// ── Daily missions UI ──
+function refreshMissionDot(){ const d = $('missionDot'); if (d) d.style.display = missionClaimable() ? '' : 'none'; }
+function openMissions(){
+  const modal = $('missionModal'), listEl = $('missionList'); if (!modal || !listEl) return;
+  const m = missionsToday(), list = currentMissions();
+  listEl.innerHTML = '';
+  list.forEach((ms, i) => {
+    const prog = Math.min(ms.target, m.prog[i] | 0), done = prog >= ms.target, claimed = m.claimed[i];
+    const pct = Math.round(prog / ms.target * 100);
+    const row = document.createElement('div'); row.className = 'mission-row' + (claimed ? ' claimed' : '');
+    row.innerHTML = `<span class="mi-ico">${ms.icon}</span>`
+      + `<span class="mi-mid"><b>${ms.text}</b><span class="mi-bar"><i style="width:${pct}%"></i></span><em>${prog} / ${ms.target}</em></span>`
+      + (claimed ? `<span class="mi-claim done">✓</span>`
+                 : `<button class="mi-claim${done ? '' : ' locked'}"${done ? '' : ' disabled'}>${ICON_GEM}${ms.gems}</button>`);
+    if (done && !claimed){ const b = row.querySelector('button'); if (b) b.addEventListener('click', () => claimMission(i)); }
+    listEl.appendChild(row);
+  });
+  modal.classList.add('active');
+}
+// ── Global leaderboard UI ──
+function escapeHtml(s){ return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function ensureName(cb){
+  const modal = $('nameModal'), inp = $('nameInput'); if (!modal || !inp){ cb && cb(); return; }
+  inp.value = Meta.name || '';
+  $('nameSave').onclick = () => {
+    Meta.name = (inp.value || '').trim().slice(0, 16) || 'Player';
+    Meta.save(); modal.classList.remove('active');
+    if (window.TDSLeaderboard && TDSLeaderboard.ready) TDSLeaderboard.submit(Meta.name, Meta.bestScore);
+    cb && cb();
+  };
+  modal.classList.add('active');
+  try { inp.focus(); } catch (e) {}
+}
+function openLeaderboard(){
+  if (!window.TDSLeaderboard || !TDSLeaderboard.ready) return;
+  if (!Meta.name){ ensureName(openLeaderboard); return; }                 // pick a nickname first
+  const modal = $('lbModal'), list = $('lbList'), you = $('lbYou'); if (!modal) return;
+  list.innerHTML = '<div class="lb-empty">Loading…</div>'; you.textContent = ''; you.className = 'lb-you';
+  modal.classList.add('active');
+  TDSLeaderboard.submit(Meta.name, Meta.bestScore);                        // ensure my latest best is posted
+  TDSLeaderboard.top(100).then(rows => {
+    const uid = (window.TDSCloud && TDSCloud.uid) || null;
+    list.innerHTML = '';
+    if (!rows.length){ list.innerHTML = '<div class="lb-empty">No scores yet — be the first!</div>'; }
+    let myRank = 0;
+    rows.forEach((r, i) => {
+      const me = uid && r.uid === uid; if (me) myRank = i + 1;
+      const medal = i < 3 ? ['🥇', '🥈', '🥉'][i] : (i + 1);
+      const row = document.createElement('div'); row.className = 'lb-row' + (me ? ' me' : '');
+      row.innerHTML = `<span class="lb-rank${i < 3 ? ' top' : ''}">${medal}</span>`
+        + `<span class="lb-name">${escapeHtml(r.name || 'Player')}</span>`
+        + `<span class="lb-score">${(r.score || 0).toLocaleString()}</span>`;
+      list.appendChild(row);
+    });
+    you.className = 'lb-you' + (myRank ? '' : ' out');
+    you.innerHTML = `<span>${myRank ? ('YOU · #' + myRank) : 'YOU · unranked'}</span><span>${(Meta.bestScore || 0).toLocaleString()}</span>`;
+  });
+}
+function claimMission(i){
+  const m = missionsToday(), ms = currentMissions()[i];
+  if (!ms || (m.prog[i] | 0) < ms.target || m.claimed[i]) return;
+  m.claimed[i] = true; Meta.gems += ms.gems; SFX.play('coin'); Meta.save();
+  openMissions(); refreshMenu(); refreshMissionDot();
+}
 
 /* ---------------- Weapons (buy · equip max 2 · upgrade) ---------------- */
 function refreshWeapons(){
   $('wp_coins').textContent = Meta.coins;
-  const ec = $('wp_eqcount'); if (ec) ec.textContent = `${Meta.weapons.length} / ${WEAPON_SLOTS} mounted`;
+  const ec = $('wp_eqcount'); if (ec) ec.textContent = `${Meta.weapons.length} / ${weaponSlots()} mounted`;
   const wrap = $('weaponGrid'); if (!wrap) return;
   wrap.innerHTML = '';
   for (const w of WEAPONS){
@@ -2181,7 +2608,7 @@ function toggleWeapon(id){
   if (!Meta.owned.includes(id)) return;
   const i = Meta.weapons.indexOf(id);
   if (i >= 0){ if (Meta.weapons.length <= 1) return; Meta.weapons.splice(i, 1); }
-  else { if (Meta.weapons.length >= WEAPON_SLOTS) Meta.weapons.shift(); Meta.weapons.push(id); }
+  else { if (Meta.weapons.length >= weaponSlots()) Meta.weapons.shift(); Meta.weapons.push(id); }
   Meta.save(); refreshWeapons(); refreshMenu();
 }
 function upgradeWeaponId(id){ const lvl = Meta.wlv[id - 1] || 1; if (lvl >= WEAPON_MAX) return; const c = weaponCost(lvl); if (Meta.coins < c) return; Meta.coins -= c; Meta.wlv[id - 1] = lvl + 1; Meta.save(); refreshWeapons(); refreshMenu(); }
@@ -2203,8 +2630,7 @@ function refreshHeroes(){
     const upg = maxed ? `<button class="wc-btn max" disabled>MAX</button>` : `<button class="wc-btn up" data-act="upg"${Meta.coins < cost ? ' disabled' : ''}><span class="up-ar">⬆</span><span class="ico ic-coin"></span>${cost}</button>`;
     const acts = owned
       ? `<button class="wc-btn eq${eq ? ' on' : ''}" data-act="equip">${eq ? 'EQUIPPED' : 'EQUIP'}</button>${upg}`
-      : `<button class="wc-btn unlock gem" data-act="unlock-gem"${Meta.gems < heroUnlockCost(h) ? ' disabled' : ''}><span class="ico ic-gem"></span>${heroUnlockCost(h)}</button>`
-        + `<button class="wc-btn unlock coin" data-act="unlock-coin"${Meta.coins < heroUnlockCoin(h) ? ' disabled' : ''}><span class="ico ic-coin"></span>${kfmt(heroUnlockCoin(h))}</button>`;
+      : `<button class="wc-btn locked" disabled>🔒 CLEAR LEVEL ${heroUnlockLevel(h.id)}</button>`;
     // live damage so upgrading shows a number going up (hero dmg +12%/lvl × rarity; tank 12+fire*12 per tier)
     let hDmg;
     if (h.tank){ const fire = (window.TankArt && TankArt.CFG[lvl] || { fire: lvl }).fire; hDmg = 12 + fire * 12; }
@@ -2214,7 +2640,7 @@ function refreshHeroes(){
       + `<span class="hc-art"></span>`
       + (owned ? '' : '<span class="hc-lock">🔒</span>')
       + `<span class="hc-name">${h.name}</span>`
-      + `<span class="hc-lv">${lvLabel}</span>`
+      + `<span class="hc-lv">${lvLabel}${(() => { const mlv = heroMasteryLevel(h); return mlv ? ` · <b class="hc-mast">${'★'.repeat(mlv)} M${mlv} +${Math.round(mlv * MASTERY_DMG * 100)}%</b>` : ''; })()}</span>`
       + `<span class="hc-stat">${Math.round(hDmg)} dmg · ${hRate.toFixed(1)}/s${h.splash ? ' · aoe' : ''}</span>`
       + `<span class="wc-acts">${acts}</span>`;
     wrap.appendChild(card);                                   // attach BEFORE paintHero so fitHeroSvg's getBBox can measure the laid-out svg
@@ -2252,9 +2678,9 @@ function refreshForces(){
   $('forces').querySelector('[data-act=dmg]').disabled = Meta.coins < Meta.dmgCost();
   $('forces').querySelector('[data-act=pow]').disabled = Meta.coins < Meta.powCost();
   // wagon armor upgrade
-  $('wagonArt').innerHTML = wagonSvg(Meta.wagon);
+  $('wagonArt').innerHTML = '<img src="assets/wagon_stage' + (wagonEtage() + 1) + '_intact.png?v=1" alt="wagon" style="width:100%;height:100%;object-fit:contain">';
   $('l_wagon').textContent = 'Lv ' + (Meta.wagon + 1);
-  $('s_wagon').textContent = '+' + (Meta.wagon * WAGON_HP) + ' HP';
+  $('s_wagon').textContent = '+' + (Meta.wagon * WAGON_HP) + ' HP · ' + weaponSlots() + ' slots';
   const wBtn = $('forces').querySelector('[data-act=wagon]'), wIco = wBtn.querySelector('.ic-coin'), wVal = $('c_wagon');
   if (Meta.wagon >= WAGON_MAX){ wBtn.disabled = true; wVal.textContent = 'MAX'; if (wIco) wIco.style.display = 'none'; }
   else { wBtn.disabled = Meta.coins < Meta.wagonCost(); wVal.textContent = Meta.wagonCost(); if (wIco) wIco.style.display = ''; }
@@ -2262,26 +2688,47 @@ function refreshForces(){
   const wrap = $('sfGrid'); if (!wrap) return;
   wrap.innerHTML = '';
   for (const f of FORCES){
+    const owned = sfOwned(f.id);
     const lvl = sfLevel(f.id), maxed = lvl >= SF_MAX, cost = sfCost(lvl);
     const evolved = f.evo && lvl >= SF_EVOLVE;
     const nm = evolved ? f.evoName : f.name, baseD = evolved ? f.evoDmg : f.dmg;
     const stat = f.kind === 'strike' ? `${Math.round(f.dmg * (1 + 0.3 * (lvl - 1)))} dmg` : `${Math.round(baseD * (1 + 0.25 * (lvl - 1)))} dmg · ${Math.round(f.hp * (1 + 0.25 * (lvl - 1)))} hp`;
-    const evoNote = (f.evo && !evolved) ? `<span class="sfc-evo">⬆ ${f.evoName} · Lv ${SF_EVOLVE}</span>` : '';
-    const card = document.createElement('div'); card.className = 'sf-card';
+    const evoNote = (owned && f.evo && !evolved) ? `<span class="sfc-evo">⬆ ${f.evoName} · Lv ${SF_EVOLVE}</span>` : '';
+    const card = document.createElement('div'); card.className = 'sf-card' + (owned ? '' : ' locked');
     card.style.setProperty('--rc', f.col);
-    const upg = maxed ? `<button class="wc-btn max" disabled>MAX</button>` : `<button class="wc-btn up" data-act="upg"><span class="up-ar">⬆</span><span class="ico ic-coin"></span>${cost}</button>`;
+    let acts;
+    if (!owned){
+      const bc = sfBuyCost(f.id);
+      acts = `<button class="wc-btn buy" data-act="buysf"${Meta.coins < bc ? ' disabled' : ''}><span class="ico ic-coin"></span>${bc}</button>`;
+    } else {
+      const upg = maxed ? `<button class="wc-btn max" disabled>MAX</button>` : `<button class="wc-btn up" data-act="upg"${Meta.coins < cost ? ' disabled' : ''}><span class="up-ar">⬆</span><span class="ico ic-coin"></span>${cost}</button>`;
+      const adUp = (lvl === 1) ? `<button class="wc-btn adup" data-act="adup">▶ FREE</button>` : '';   // first upgrade: rewarded ad
+      acts = upg + adUp;
+    }
     card.innerHTML = `<span class="sfc-ico">${f.icon}</span>`
       + `<span class="sfc-name">${nm}</span>`
-      + `<span class="sfc-lv">Lv ${lvl} / ${SF_MAX}</span>`
+      + (owned ? `<span class="sfc-lv">Lv ${lvl} / ${SF_MAX}</span>` : `<span class="sfc-lv locked">🔒 LOCKED</span>`)
       + `<span class="sfc-stat">${stat}</span>`
       + evoNote
       + `<span class="sfc-cost">cost <i class="blt"></i>${f.cost} pts</span>`
-      + `<span class="wc-acts">${upg}</span>`;
+      + `<span class="wc-acts">${acts}</span>`;
     const up = card.querySelector('[data-act=upg]'); if (up) up.addEventListener('click', () => upgradeSF(f.id));
+    const bsf = card.querySelector('[data-act=buysf]'); if (bsf) bsf.addEventListener('click', () => buySF(f.id));
+    const adu = card.querySelector('[data-act=adup]'); if (adu) adu.addEventListener('click', () => upgradeSFAd(f.id));
     wrap.appendChild(card);
   }
 }
-function upgradeSF(id){ const lvl = sfLevel(id); if (lvl >= SF_MAX) return; const c = sfCost(lvl); if (Meta.coins < c) return; Meta.coins -= c; Meta.sfLvl[id] = lvl + 1; Meta.save(); refreshForces(); }
+function upgradeSF(id){ if (!sfOwned(id)) return; const lvl = sfLevel(id); if (lvl >= SF_MAX) return; const c = sfCost(lvl); if (Meta.coins < c) return; Meta.coins -= c; Meta.sfLvl[id] = lvl + 1; Meta.save(); refreshForces(); refreshMenu(); }
+function buySF(id){                                        // unlock a locked force with coins (cheap)
+  if (sfOwned(id)) return;
+  const c = sfBuyCost(id); if (Meta.coins < c) return;
+  Meta.coins -= c; Meta.sfOwned.push(id); Meta.sfLvl[id] = Meta.sfLvl[id] || 1;
+  SFX.play('coin'); Meta.save(); refreshForces(); refreshMenu();
+}
+function upgradeSFAd(id){                                  // FIRST upgrade only (Lv 1→2) via a rewarded ad
+  if (!sfOwned(id) || sfLevel(id) !== 1) return;
+  playRewardedAd(() => { Meta.sfLvl[id] = 2; Meta.save(); refreshForces(); refreshMenu(); });
+}
 
 /* ---------------- Menu castle + loadout ---------------- */
 let castleShown = -1;
@@ -2339,7 +2786,7 @@ function refreshHeroLoadout(){
 }
 
 /* ---------------- Input wiring ---------------- */
-$('playBtn').addEventListener('click', startRun);
+$('playBtn').addEventListener('click', () => { state.endless = false; launchLevel(); });   // menu PLAY = current campaign level (never endless)
 $('toShop').addEventListener('click', () => show('shop'));
 $('toBattle').addEventListener('click', () => show('menu'));
 $('toLevels').addEventListener('click', () => show('levels'));
@@ -2372,6 +2819,21 @@ document.querySelectorAll('#forces .upg[data-act]').forEach(b => b.addEventListe
 
 $('sndBtn').addEventListener('click', toggleSound);
 $('sndBtn2').addEventListener('click', toggleSound);
+{ const ub = $('ultBtn'); if (ub) ub.addEventListener('click', fireUltimate); }   // hero ultimate
+{ const eb = $('endlessBtn'); if (eb) eb.addEventListener('click', () => { closeResultModals(); startEndless(); }); }   // endless / survival
+{ const mb = $('missionBtn'); if (mb) mb.addEventListener('click', openMissions);        // daily missions
+  const mc = $('missionClose'); if (mc) mc.addEventListener('click', () => $('missionModal').classList.remove('active')); }
+// Play Games Services menu buttons (Android): open the native leaderboard / achievements UI.
+// The buttons stay hidden until sign-in fires 'tds-games-ready' (never shown on web).
+{ const lb = $('btnLeaderboard'), ac = $('btnAchievements'), gb = $('gamesBtns');
+  if (lb) lb.addEventListener('click', openLeaderboard);                      // Firestore global leaderboard
+  if (ac){ ac.addEventListener('click', () => window.TDSGames && TDSGames.showAchievements()); ac.style.display = 'none'; }
+  const showGames = () => { if (gb) gb.style.display = ''; };
+  // show the 🏆 button once the leaderboard backend (Firebase) is ready, or when PGS signs in
+  if (window.TDSLeaderboard && TDSLeaderboard.ready) showGames();
+  document.addEventListener('tds-games-ready', () => { showGames(); if (ac) ac.style.display = ''; });   // PGS additionally lights achievements
+  const lbc = $('lbClose'); if (lbc) lbc.addEventListener('click', () => $('lbModal').classList.remove('active'));
+}
 $('tkAd').addEventListener('click', adTicket);
 $('tkClose').addEventListener('click', closeTicketModal);
 setInterval(() => { if (state.screen === 'menu'){ regenTickets(); refreshTikUi(); } }, 1000);   // live 🎫 countdown
@@ -2444,6 +2906,8 @@ function loop(ts){
 function preload(cb){
   const list = { bg: 'assets/bg.png' };   // enemies are now procedural (UndeadArt); no sprite sheets needed
   for (const k in LEVEL_BG) list['bg_' + LEVEL_BG[k]] = 'assets/bg/' + LEVEL_BG[k] + '.png';  // per-level scenes
+  for (let st = 1; st <= 3; st++) for (const d of ['intact','damaged','destroyed']) list['wagon_s' + st + '_' + d] = 'assets/wagon_stage' + st + '_' + d + '.png';   // 3-étage wagon tower
+  for (const fx of ['smoke','fire','explosion','dust']) list['fx_' + fx] = 'assets/fx_' + fx + '.png';   // destruction effect sheets
   let n = Object.keys(list).length;
   for (const k in list){ const im = new Image(); IMG[k] = im; im.onload = im.onerror = () => { if (--n === 0) cb(); }; im.src = list[k]; }
 }
@@ -2460,9 +2924,9 @@ preload(() => {
     resize();
     window.__sim = true;                          // sim: interstitials resolve instantly (no overlays)
     bump = () => {};                              // sim speed: skip the forced-reflow HUD bump animation
-    const base = () => { Meta.hp = 1; Meta.dmg = 1; Meta.pow = 1; Meta.castle = 0; Meta.weapons = [1]; Meta.owned = [1]; Meta.wlv = Array(WEAPONS.length).fill(1); Meta.hero = 1; Meta.tankLvl = 1; Meta.heroLvl = {}; Meta.wagon = 0; Meta.sfLvl = {}; Meta.coins = 300; Meta.gems = 0; };
+    const base = () => { Meta.hp = 1; Meta.dmg = 1; Meta.pow = 1; Meta.castle = 0; Meta.weapons = [1]; Meta.owned = [1]; Meta.wlv = Array(WEAPONS.length).fill(1); Meta.hero = 1; Meta.tankLvl = 1; Meta.heroLvl = {}; Meta.wagon = 0; Meta.sfLvl = {}; Meta.sfOwned = FORCES.map(f => f.id); Meta.coins = 300; Meta.gems = 0; };
     const dps = w => (w.dmg * w.rate) * (w.splash ? 1.4 : 1);
-    const reEquip = () => { Meta.weapons = Meta.owned.slice().sort((a, b) => dps(WEAPONS[b - 1]) - dps(WEAPONS[a - 1])).slice(0, WEAPON_SLOTS); };
+    const reEquip = () => { Meta.weapons = Meta.owned.slice().sort((a, b) => dps(WEAPONS[b - 1]) - dps(WEAPONS[a - 1])).slice(0, weaponSlots()); };
     // the sim PLAYS like a real player: keeps the force field topped up, airstrikes crowds
     const FUNIT = FORCES.filter(f => f.kind === 'unit'), FSTRIKE = FORCES.find(f => f.kind === 'strike');
     const simDeploy = () => {
@@ -2531,4 +2995,66 @@ preload(() => {
   }
   requestAnimationFrame(loop);
 });
+
+/* ---------------- Connectivity gate: this game REQUIRES an internet connection ----------------
+   RULE: the game must not be playable without a working internet connection.
+   navigator.onLine catches airplane-mode / no-signal instantly. An active reachability probe
+   also catches "connected to Wi-Fi but no real internet" (captive portals, dead uplinks).
+   The probe LOADS A REMOTE IMAGE rather than fetch()-ing:
+     • an <img> load works cross-origin AND from a file:// page — a no-cors fetch does neither
+       (it rejects outright on a file:// origin, so it would falsely lock out online players);
+     • it resolves online ONLY when a real image actually decodes, so a captive portal — which
+       serves an HTML login page, not an image — correctly reads as OFFLINE (a no-cors fetch
+       instead "succeeds" on that HTML and would wave the user straight past the gate).
+   The host is a Google asset: the game already hard-depends on Google (Firebase/gstatic,
+   Analytics/AdMob), so if it is unreachable the game cannot run regardless. While offline the
+   whole UI is covered by #netGate and any live battle is paused; when the connection returns
+   the gate hides and the battle we paused resumes. */
+(function(){
+  const gate = $('netGate'), retry = $('netRetry');
+  if (!gate) return;
+  const PROBE_URL = 'https://www.google.com/favicon.ico';   // small, stable, decodes to a real image
+  let shown = false, misses = 0, probing = false;
+
+  function probe(){                                        // resolves true only if a real image actually decodes
+    return new Promise(res => {
+      if (!navigator.onLine){ res(false); return; }
+      const img = new Image();
+      let done = false;
+      const finish = ok => { if (done) return; done = true; clearTimeout(to); img.onload = img.onerror = null; res(ok); };
+      const to = setTimeout(() => finish(false), 5000);     // slow/dead link ⇒ treat as offline
+      img.onload  = () => finish(img.naturalWidth > 0);     // a decoded image ⇒ genuine internet
+      img.onerror = () => finish(false);                    // no route, or captive-portal HTML ⇒ offline
+      img.src = PROBE_URL + '?_=' + Date.now();             // cache-bust so we test the live link every time
+    });
+  }
+  function setGate(offline){
+    if (offline === shown) return;
+    shown = offline;
+    gate.classList.toggle('show', offline);
+    if (offline){
+      if (state.screen === 'game' && !state.paused){ state.paused = true; state.netPaused = true; }
+    } else if (state.netPaused){                           // auto-resume the battle the outage paused
+      state.netPaused = false;
+      const pm = $('pauseModal');
+      if (!(pm && pm.classList.contains('active'))) state.paused = false;
+    }
+  }
+  function evaluate(force){                                // force = user tapped RETRY → reflect the result immediately
+    if (!navigator.onLine){ misses = 0; setGate(true); return; }
+    if (probing) return; probing = true;
+    probe().then(ok => {
+      probing = false;
+      if (ok){ misses = 0; setGate(false); }
+      else if (force) setGate(true);                       // explicit retry: honour the failure now
+      else if (++misses >= 2) setGate(true);               // background: tolerate one transient miss
+    });
+  }
+  addEventListener('online',  () => evaluate());
+  addEventListener('offline', () => { misses = 0; setGate(true); });
+  retry && retry.addEventListener('click', () => evaluate(true));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) evaluate(); });
+  setInterval(() => { if (!document.hidden) evaluate(); }, 15000);   // catch a captive-portal / dead-uplink drop promptly
+  if (!navigator.onLine) setGate(true); else evaluate();   // initial check on boot
+})();
 })();

@@ -29,13 +29,12 @@
   /* ============================ 1) YOUR FIREBASE CONFIG ============================ */
   // Replace every "PASTE_..." value. While apiKey still contains "PASTE", Firebase is OFF.
   var FIREBASE_CONFIG = {
-    apiKey:            'PASTE_API_KEY',
-    authDomain:        'PASTE_PROJECT_ID.firebaseapp.com',
-    projectId:         'PASTE_PROJECT_ID',
-    storageBucket:     'PASTE_PROJECT_ID.appspot.com',
-    messagingSenderId: 'PASTE_SENDER_ID',
-    appId:             'PASTE_APP_ID',
-    measurementId:     'PASTE_MEASUREMENT_ID'   // G-XXXXXXXXXX  (needed for Analytics)
+    apiKey:            "AIzaSyCaiOXsfkECRdu7lAsLV2BcjXIFMgvrzhE",
+    authDomain:        "tds-1b407.firebaseapp.com",
+    projectId:         "tds-1b407",
+    storageBucket:     "tds-1b407.firebasestorage.app",
+    messagingSenderId: "246209348792",
+    appId:             "1:246209348792:android:1a4f8c3b9b534f684d604d"
   };
 
   /* ===================== 2) REMOTE CONFIG DEFAULTS (the ad setup) ==================== */
@@ -52,9 +51,7 @@
     // AdMob unit ids (Android). These are Google's PUBLIC TEST ids — replace in the console.
     admob_interstitial_id:  'ca-app-pub-3940256099942544/1033173712',
     admob_rewarded_id:      'ca-app-pub-3940256099942544/5224354917',
-    admob_banner_id:        'ca-app-pub-3940256099942544/6300978111',
-    // reserved for a future "remove ads" product
-    remove_ads_enabled:     true
+    admob_banner_id:        'ca-app-pub-3940256099942544/6300978111'
   };
 
   // How fresh Remote Config must be. 1h is a sane production value; while wiring things up
@@ -93,8 +90,40 @@
     setUserProp: function (k, v) {
       try { if (_analytics) { var o = {}; o[k] = v; _analytics.setUserProperties(o); } } catch (e) {}
     },
+    // Crash/error reporting. The game runs inside a WebView, so native Crashlytics only sees
+    // NATIVE crashes — these forward uncaught + handled JS exceptions to Analytics (event
+    // "js_error") so gameplay crashes are visible too. (Analytics caps string params at 100 chars.)
+    recordError: function (err, fatal) {
+      try {
+        var msg = ((err && (err.message || err.reason)) || err || 'error') + '';
+        var loc = '';
+        if (err && err.stack) { loc = String(err.stack).split('\n')[1] || String(err.stack).split('\n')[0] || ''; }
+        msg = msg.slice(0, 100); loc = loc.trim().slice(0, 100);
+        // Throttle: dedup identical errors and cap the session total, so a per-frame exception in the
+        // render loop can't flood Analytics (burning event quota and drowning out real signal).
+        var key = msg + '|' + loc;
+        this._errSeen = this._errSeen || {};
+        if (this._errSeen[key]) return;                       // this exact error already reported this session
+        if ((this._errN = (this._errN || 0) + 1) > 10) return; // hard per-session cap
+        this._errSeen[key] = 1;
+        this.log('js_error', {
+          error_message: msg,
+          error_at: loc,
+          fatal: fatal ? 1 : 0,
+          platform: platform()
+        });
+      } catch (e) {}
+    },
     get on() { return !!_analytics; }
   };
+
+  // Global JS crash capture → Analytics (best-effort; no-ops until Firebase is configured).
+  window.addEventListener('error', function (e) {
+    window.TDSAnalytics.recordError((e && (e.error || e.message)) || e, true);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    window.TDSAnalytics.recordError((e && e.reason) || e, true);
+  });
 
   // Remote Config: reads live values when available, otherwise the RC_DEFAULTS above.
   window.TDSRemoteConfig = {

@@ -196,8 +196,10 @@ window.HeroSquad = (() => {
       + `<ellipse cx="82" cy="84" rx="10" ry="6" fill="${z.skinDark}" opacity="0.32"/>`
       + `<path d="M63,43 q12,-7 24,-2" stroke="#3a2a22" stroke-width="3.2" fill="none" stroke-linecap="round"/>`
       + `<path d="M104,45 q10,-4 18,1" stroke="#3a2a22" stroke-width="2.8" fill="none" stroke-linecap="round" opacity="0.92"/>`
-      + `<g><ellipse cx="80" cy="60" rx="11.5" ry="13.5" fill="#ffffff" stroke="${OUT}" stroke-width="2"/><circle cx="76" cy="63" r="5.4" fill="#27333d"/><circle cx="73.5" cy="59.5" r="2" fill="#ffffff"/></g>`
-      + `<g><ellipse cx="112" cy="62" rx="8.2" ry="10.2" fill="#ffffff" stroke="${OUT}" stroke-width="2"/><circle cx="110" cy="65" r="4.1" fill="#27333d"/><circle cx="108" cy="62" r="1.5" fill="#ffffff"/></g>`
+      // pupils sit hard toward the SOURCE-facing side (left) and level — after the rig's mirror
+      // the hero clearly looks RIGHT, at the enemies (they used to read as gazing down-backward)
+      + `<g><ellipse cx="80" cy="60" rx="11.5" ry="13.5" fill="#ffffff" stroke="${OUT}" stroke-width="2"/><circle cx="72.5" cy="60.5" r="5.4" fill="#27333d"/><circle cx="70" cy="57" r="2" fill="#ffffff"/></g>`
+      + `<g><ellipse cx="112" cy="62" rx="8.2" ry="10.2" fill="#ffffff" stroke="${OUT}" stroke-width="2"/><circle cx="106.5" cy="62.5" r="4.1" fill="#27333d"/><circle cx="104.5" cy="59.5" r="1.5" fill="#ffffff"/></g>`
       + `<path d="M67,87 q14,9 26,2" stroke="#7a3b32" stroke-width="3" fill="none" stroke-linecap="round"/>`;
     head += headgear(z);
     G += `<g>${head}</g>`;
