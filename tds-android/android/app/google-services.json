@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "246209348792",
+    "project_id": "tds-1b407",
+    "storage_bucket": "tds-1b407.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:246209348792:android:1a4f8c3b9b534f684d604d",
+        "android_client_info": {
+          "package_name": "com.TDS.zombietowerdefense"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCaiOXsfkECRdu7lAsLV2BcjXIFMgvrzhE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

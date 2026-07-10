@@ -4,4 +4,7 @@
     <string name="title_activity_main">Tower Destiny Survive</string>
     <string name="package_name">com.TDS.zombietowerdefense</string>
     <string name="custom_url_scheme">com.TDS.zombietowerdefense</string>
+    <!-- Play Games Services numeric App ID (Play Console → Play Games Services → Configuration).
+         Kept as a string resource so it is NOT parsed as an integer. TODO: paste your real id. -->
+    <string name="game_services_project_id">246209348792</string>
 </resources>
