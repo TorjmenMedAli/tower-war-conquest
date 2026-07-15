@@ -48,7 +48,7 @@ def circle_mask(size):
 
 legacy = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 fg = {"mdpi": 108, "hdpi": 162, "xhdpi": 216, "xxhdpi": 324, "xxxhdpi": 432}
-SAFE = 0.70  # adaptive safe zone: keep the art inside the central ~66% the mask reveals
+SAFE = 0.74  # adaptive safe zone: keep the art inside the central ~66% the mask reveals
 
 for dens, sz in legacy.items():
     d = os.path.join(RES, "mipmap-" + dens)
