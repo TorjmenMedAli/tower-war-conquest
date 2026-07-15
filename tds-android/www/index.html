@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Fredoka:wght@500;600;700&family=Luckiest+Guy&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=81" />
+<link rel="stylesheet" href="style.css?v=82" />
 </head>
 <body>
 <div class="app" id="app">
@@ -381,9 +381,14 @@
   <div class="modal" id="lbModal">
     <div class="panel lbpanel">
       <div class="lb-head"><span>🏆 LEADERBOARD</span><button class="modal-x" id="lbClose">✕</button></div>
+      <div class="lb-tabs">
+        <button class="lb-tab active" id="lbTabMonth">MONTHLY</button>
+        <button class="lb-tab" id="lbTabAll">ALL-TIME</button>
+      </div>
+      <div class="lb-prizes" id="lbPrizes">🥇🥈🥉 <b>1000</b> 💎 &nbsp;•&nbsp; #4–10 <b>300</b> 💎</div>
       <div class="lb-you" id="lbYou"></div>
       <div class="lb-list" id="lbList"><div class="lb-empty">Loading…</div></div>
-      <div class="lb-foot">Best single-run score · updates after each battle</div>
+      <div class="lb-foot" id="lbFoot">Best single-run score · updates after each battle</div>
     </div>
   </div>
 
@@ -394,6 +399,17 @@
       <div class="name-sub">This is how you appear on the leaderboard.</div>
       <input class="name-input" id="nameInput" maxlength="16" placeholder="Player" autocomplete="off" />
       <button class="big-btn green" id="nameSave">SAVE</button>
+    </div>
+  </div>
+
+  <!-- MONTHLY CONTEST prize (granted at the start of the next month) -->
+  <div class="modal" id="monthModal">
+    <div class="panel namepanel">
+      <div class="month-troph">🏆</div>
+      <div class="name-title">MONTHLY CONTEST</div>
+      <div class="month-sub" id="monthSub">You placed in last month's contest!</div>
+      <div class="month-gems" id="monthGems">+300 💎</div>
+      <button class="big-btn green" id="monthClaim">AWESOME!</button>
     </div>
   </div>
 
@@ -427,9 +443,9 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
 <script src="firebase.js?v=5"></script>
 <script src="cloud.js?v=3"></script>
-<script src="leaderboard.js?v=1"></script>
+<script src="leaderboard.js?v=2"></script>
 <script src="native.js?v=7"></script>
 <script src="iap.js?v=1"></script>
-<script src="game.js?v=140"></script>
+<script src="game.js?v=141"></script>
 </body>
 </html>

@@ -328,6 +328,8 @@ const Meta = {
   endlessBest: 0,                                        // best score in Endless / boss-rush mode (post-campaign)
   bestScore: 0,                                          // best single-run score (feeds the global leaderboard)
   name: '',                                              // leaderboard nickname (chosen once)
+  monthScore: null,                                      // monthly contest { m:'YYYY-MM', total } — sum of run scores this month
+  monthClaimed: '',                                      // last month whose contest prizes were already settled for this player
   sv: 0,                                                 // monotonic save version — cloud conflict resolution (last-write-wins)
   dailyDay: 0, adDay: 0, adChestUsed: 0, adCoinUsed: 0, adGemUsed: 0,    // daily free chest + per-day ad-box limits
   streak: 0, streakDay: 0,                                 // daily login streak (day N pays 100·N coins)
@@ -351,7 +353,8 @@ const Meta = {
     dailyDay:Meta.dailyDay, adDay:Meta.adDay, adChestUsed:Meta.adChestUsed, adCoinUsed:Meta.adCoinUsed, adGemUsed:Meta.adGemUsed,
     streak:Meta.streak, streakDay:Meta.streakDay, heroesOwned:Meta.heroesOwned,
     sound:Meta.sound, stars:Meta.stars, ftue:Meta.ftue, starClaimed:Meta.starClaimed, pticket:Meta.pticket, pticketAt:Meta.pticketAt, rated:Meta.rated, ratePicked:Meta.ratePicked,
-    endlessBest:Meta.endlessBest, bestScore:Meta.bestScore, name:Meta.name, wagonCapMig:Meta.wagonCapMig, sv:Meta.sv })); } catch(e){} },
+    endlessBest:Meta.endlessBest, bestScore:Meta.bestScore, name:Meta.name, wagonCapMig:Meta.wagonCapMig,
+    monthScore:Meta.monthScore, monthClaimed:Meta.monthClaimed, sv:Meta.sv })); } catch(e){} },
   // castle stats — upgrading HP / the castle stage make the castle tankier
   heroMaxHp(){ return 430 + (Meta.hp - 1) * 70; },                          // hero core — the LAST line of defence (bigger base so a fresh run lasts ~1 min+)
   wagonMaxHp(){ return 200 + Meta.castle * 90 + Meta.wagon * WAGON_HP; },    // wagon shield — soaks damage first
@@ -1159,6 +1162,13 @@ function tallyGameAndStreak(){
     const sc = state ? (state.score | 0) : 0;
     if (sc > (Meta.bestScore | 0)) Meta.bestScore = sc;
     if (Meta.name && window.TDSLeaderboard && TDSLeaderboard.ready) TDSLeaderboard.submit(Meta.name, Meta.bestScore);
+    // monthly contest: every run's score adds to this month's total (top 10 win gems — checkMonthReward)
+    if (sc > 0 && window.TDSLeaderboard && TDSLeaderboard.monthKey){
+      const mk = TDSLeaderboard.monthKey();
+      if (!Meta.monthScore || Meta.monthScore.m !== mk) Meta.monthScore = { m: mk, total: 0 };
+      Meta.monthScore.total += sc;
+      if (Meta.name && TDSLeaderboard.ready) TDSLeaderboard.submitMonthly(Meta.name, Meta.monthScore.total, mk);
+    }
   }
   // Play Games Services: submit the run to the leaderboards + unlock milestone achievements
   // (Android only; a harmless no-op on web / before sign-in — see TDSGames in native.js).
@@ -2769,30 +2779,81 @@ function ensureName(cb){
   modal.classList.add('active');
   try { inp.focus(); } catch (e) {}
 }
+/* ---------------- Monthly contest (top 10 of each month win gems) ---------------- */
+const MONTH_PRIZES = { top3: 1000, top10: 300 };           // ranks 1-3 → 1000 💎, ranks 4-10 → 300 💎
+function monthPrize(rank){ return rank >= 1 && rank <= 3 ? MONTH_PRIZES.top3 : (rank >= 4 && rank <= 10 ? MONTH_PRIZES.top10 : 0); }
+// Settle LAST month's contest once per player: read the final top 10, grant gems if we placed.
+// Retries harmlessly until the board fetch succeeds and the cloud identity exists.
+function checkMonthReward(){
+  const LB = window.TDSLeaderboard;
+  if (!LB || !LB.ready || !LB.prevMonthKey) return;
+  const pm = LB.prevMonthKey();
+  if (Meta.monthClaimed === pm) return;                    // that month is already settled
+  const me = LB.uid(); if (!me) return;                    // identity not up yet → retry later
+  LB.topMonthly(pm, 10).then(rows => {
+    if (!rows) return;                                     // fetch FAILED → keep unclaimed, retry later
+    Meta.monthClaimed = pm;                                // settled — even when unranked or empty board
+    let rank = 0; rows.forEach((r, i) => { if (r.uid === me) rank = i + 1; });
+    const gems = monthPrize(rank);
+    if (gems){
+      Meta.gems += gems; SFX.play('coin');
+      const sub = $('monthSub'), g = $('monthGems'), m = $('monthModal');
+      if (sub) sub.textContent = `You finished #${rank} in last month's contest!`;
+      if (g) g.textContent = `+${gems} 💎`;
+      if (m) m.classList.add('active');
+      refreshMenu();
+    }
+    Meta.save();
+  });
+}
+let lbTab = 'month';                                       // 'month' | 'all' — the contest is the default view
+function daysLeftInMonth(){ const d = new Date(); return Math.max(1, Math.ceil((new Date(d.getFullYear(), d.getMonth() + 1, 1) - d) / 86400000)); }
 function openLeaderboard(){
   if (!window.TDSLeaderboard || !TDSLeaderboard.ready) return;
   if (!Meta.name){ ensureName(openLeaderboard); return; }                 // pick a nickname first
-  const modal = $('lbModal'), list = $('lbList'), you = $('lbYou'); if (!modal) return;
-  list.innerHTML = '<div class="lb-empty">Loading…</div>'; you.textContent = ''; you.className = 'lb-you';
+  const modal = $('lbModal'); if (!modal) return;
   modal.classList.add('active');
-  TDSLeaderboard.submit(Meta.name, Meta.bestScore);                        // ensure my latest best is posted
-  TDSLeaderboard.top(100).then(rows => {
-    const uid = (window.TDSCloud && TDSCloud.uid) || null;
-    list.innerHTML = '';
-    if (!rows.length){ list.innerHTML = '<div class="lb-empty">No scores yet — be the first!</div>'; }
-    let myRank = 0;
-    rows.forEach((r, i) => {
-      const me = uid && r.uid === uid; if (me) myRank = i + 1;
-      const medal = i < 3 ? ['🥇', '🥈', '🥉'][i] : (i + 1);
-      const row = document.createElement('div'); row.className = 'lb-row' + (me ? ' me' : '');
-      row.innerHTML = `<span class="lb-rank${i < 3 ? ' top' : ''}">${medal}</span>`
-        + `<span class="lb-name">${escapeHtml(r.name || 'Player')}</span>`
-        + `<span class="lb-score">${(r.score || 0).toLocaleString()}</span>`;
-      list.appendChild(row);
-    });
-    you.className = 'lb-you' + (myRank ? '' : ' out');
-    you.innerHTML = `<span>${myRank ? ('YOU · #' + myRank) : 'YOU · unranked'}</span><span>${(Meta.bestScore || 0).toLocaleString()}</span>`;
+  checkMonthReward();                                      // settle last month's prizes on open too
+  renderLb();
+}
+function renderLb(){
+  const list = $('lbList'), you = $('lbYou'), foot = $('lbFoot'), prizes = $('lbPrizes');
+  const tm = $('lbTabMonth'), ta = $('lbTabAll');
+  if (!list || !you) return;
+  if (tm) tm.classList.toggle('active', lbTab === 'month');
+  if (ta) ta.classList.toggle('active', lbTab === 'all');
+  if (prizes) prizes.style.display = lbTab === 'month' ? '' : 'none';
+  list.innerHTML = '<div class="lb-empty">Loading…</div>'; you.textContent = ''; you.className = 'lb-you';
+  const me = TDSLeaderboard.uid();
+  if (lbTab === 'month'){
+    const mk = TDSLeaderboard.monthKey();
+    const mine = (Meta.monthScore && Meta.monthScore.m === mk) ? (Meta.monthScore.total | 0) : 0;
+    if (mine > 0) TDSLeaderboard.submitMonthly(Meta.name, mine, mk);       // ensure my total is posted
+    if (foot) foot.textContent = `Total score this month · ends in ${daysLeftInMonth()}d · prizes paid on the 1st`;
+    TDSLeaderboard.topMonthly(mk, 100).then(rows => fillLbRows(list, you, rows || [], me, 'total', mine));
+  } else {
+    if (foot) foot.textContent = 'Best single-run score · updates after each battle';
+    TDSLeaderboard.submit(Meta.name, Meta.bestScore);                      // ensure my latest best is posted
+    TDSLeaderboard.top(100).then(rows => fillLbRows(list, you, rows || [], me, 'score', Meta.bestScore | 0));
+  }
+}
+function fillLbRows(list, you, rows, me, field, mineVal){
+  list.innerHTML = '';
+  if (!rows.length){ list.innerHTML = '<div class="lb-empty">No scores yet — be the first!</div>'; }
+  let myRank = 0;
+  rows.forEach((r, i) => {
+    const isMe = me && r.uid === me; if (isMe) myRank = i + 1;
+    const medal = i < 3 ? ['🥇', '🥈', '🥉'][i] : (i + 1);
+    const row = document.createElement('div'); row.className = 'lb-row' + (isMe ? ' me' : '');
+    row.innerHTML = `<span class="lb-rank${i < 3 ? ' top' : ''}">${medal}</span>`
+      + `<span class="lb-name">${escapeHtml(r.name || 'Player')}</span>`
+      + `<span class="lb-score">${(r[field] || 0).toLocaleString()}</span>`;
+    list.appendChild(row);
   });
+  const prize = field === 'total' ? monthPrize(myRank) : 0;                // show the reward your CURRENT rank would pay
+  you.className = 'lb-you' + (myRank ? '' : ' out');
+  you.innerHTML = `<span>${myRank ? ('YOU · #' + myRank) : 'YOU · unranked'}${prize ? ` · wins ${prize} 💎` : ''}</span>`
+    + `<span>${(mineVal || 0).toLocaleString()}</span>`;
 }
 function claimMission(i){
   const m = missionsToday(), ms = currentMissions()[i];
@@ -3096,7 +3157,13 @@ $('sndBtn2').addEventListener('click', toggleSound);
   if (window.TDSLeaderboard && TDSLeaderboard.ready) showGames();
   document.addEventListener('tds-games-ready', () => { showGames(); if (ac) ac.style.display = ''; });   // PGS additionally lights achievements
   const lbc = $('lbClose'); if (lbc) lbc.addEventListener('click', () => $('lbModal').classList.remove('active'));
+  // monthly-contest tabs + reward popup
+  const tmb = $('lbTabMonth'); if (tmb) tmb.addEventListener('click', () => { lbTab = 'month'; renderLb(); });
+  const tab = $('lbTabAll');   if (tab) tab.addEventListener('click', () => { lbTab = 'all'; renderLb(); });
+  const mcl = $('monthClaim'); if (mcl) mcl.addEventListener('click', () => $('monthModal').classList.remove('active'));
 }
+// settle last month's contest prizes shortly after boot (the cloud identity arrives async)
+setTimeout(checkMonthReward, 6000); setTimeout(checkMonthReward, 30000);
 $('tkAd').addEventListener('click', adTicket);
 $('tkClose').addEventListener('click', closeTicketModal);
 setInterval(() => { if (state.screen === 'menu'){ regenTickets(); refreshTikUi(); } }, 1000);   // live 🎫 countdown

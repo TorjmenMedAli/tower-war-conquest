@@ -1080,6 +1080,18 @@ button:disabled:active { transform: none; }
 .lb-empty { text-align: center; color: #8f9cb0; padding: 24px 0; }
 .lb-foot { text-align: center; font-size: 11px; color: #7f8ca0; margin-top: 12px; }
 
+/* ── Monthly contest (leaderboard tabs + prize strip + reward popup) ── */
+.lb-tabs { display: flex; gap: 8px; margin-bottom: 10px; }
+.lb-tab { flex: 1; padding: 9px 0; border: 0; border-radius: 11px; font-weight: 900; font-size: 13px; letter-spacing: .4px;
+  color: #9aa7b6; background: #2c3242; cursor: pointer; }
+.lb-tab.active { color: #3a2703; background: linear-gradient(180deg, #ffe07a, #ffb63d); box-shadow: 0 2px 0 rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.5); }
+.lb-prizes { text-align: center; font-size: 12.5px; font-weight: 800; color: #ffd24a; background: rgba(255, 210, 74, .08);
+  border: 1px dashed rgba(255, 210, 74, .38); border-radius: 10px; padding: 7px 8px; margin-bottom: 10px; }
+.lb-prizes b { color: #ffe07a; }
+.month-troph { font-size: 46px; line-height: 1; margin-bottom: 8px; filter: drop-shadow(0 4px 8px rgba(255, 190, 40, .35)); }
+.month-sub { font-size: 14px; color: #cfd9e6; font-weight: 700; margin: 4px 0 2px; }
+.month-gems { font-size: 27px; font-weight: 900; color: #7ef0a0; margin: 10px 0 16px; text-shadow: 0 2px 10px rgba(90, 240, 150, .35); }
+
 /* ── Nickname prompt ── */
 .namepanel { width: min(88%, 340px); text-align: center; }
 .name-title { font-size: 20px; font-weight: 900; color: #ffd24a; margin-bottom: 6px; }

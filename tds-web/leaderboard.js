@@ -1,60 +1,134 @@
-/* leaderboard.js — global high-score leaderboard via Firestore (works in the Android WebView + web).
-   Reuses the same Firebase app + anonymous auth as cloud.js (identity = TDSCloud.uid). One doc per
-   player at leaderboard/{uid} = { uid, name, score, updated }. 100% defensive: until Firebase is
-   configured (firebase.js) it no-ops and the 🏆 button stays hidden.
+/* leaderboard.js — global ALL-TIME + MONTHLY-CONTEST leaderboards via Firestore.
+   Two backends, one identity model (mirrors cloud.js):
+   • NATIVE (Android/iOS, @capacitor-firebase/firestore installed): queries go through the
+     native plugin, identity = the native anonymous-auth uid (TDSCloud.uid — the SAME identity
+     as the cloud save, so "me" highlighting and reward claims match the save).
+   • WEB: the Firebase JS SDK from firebase.js, identity = the web anonymous-auth uid.
+   100% defensive: no backend → api.ready stays false and the 🏆 button stays hidden.
+
+   DATA MODEL
+   • leaderboard/{uid}                = { uid, name, score, platform, updated }   best single run (monotonic)
+   • monthly/{YYYY-MM}/scores/{uid}   = { uid, name, total, month, platform, updated }
+     `total` = SUM of every run's score that month. Top 3 of a finished month win 1000 gems,
+     ranks 4-10 win 300 (granted client-side in game.js → checkMonthReward on the next launch).
 
    ┌──────────────────────────────────────────────────────────────────────────────┐
-   │  FIRESTORE RULES (add to the same rules as saves/{uid}):                       │
-   │    match /leaderboard/{uid} {                                                   │
-   │      allow read: if request.auth != null;                    // anyone signed-in reads the board
-   │      allow write: if request.auth != null                                       │
-   │                   && request.auth.uid == uid                 // only your own row │
-   │                   && request.resource.data.score is int                          │
-   │                   && request.resource.data.score >= 0                            │
-   │                   && request.resource.data.score <= 100000000;  // sanity cap (anti-cheat)│
-   │    }                                                                            │
-   │  INDEX: Firestore auto-prompts for a single-field DESC index on `score` the     │
-   │  first time top() runs — click the link it logs, or create it under Indexes.    │
+   │  FIRESTORE RULES (add next to saves/{uid}):                                  │
+   │    match /leaderboard/{uid} {                                                │
+   │      allow read: if request.auth != null;                                    │
+   │      allow write: if request.auth != null && request.auth.uid == uid         │
+   │                   && request.resource.data.score is int                      │
+   │                   && request.resource.data.score >= 0                        │
+   │                   && request.resource.data.score <= 100000000;               │
+   │    }                                                                         │
+   │    match /monthly/{month}/scores/{uid} {                                     │
+   │      allow read: if request.auth != null;                                    │
+   │      allow write: if request.auth != null && request.auth.uid == uid         │
+   │                   && request.resource.data.total is int                      │
+   │                   && request.resource.data.total >= 0                        │
+   │                   && request.resource.data.total <= 1000000000;              │
+   │    }                                                                         │
    └──────────────────────────────────────────────────────────────────────────────┘ */
 (function () {
   'use strict';
 
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function monthKey(d) { d = d || new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1); }
+  function prevMonthKey() { var d = new Date(); return monthKey(new Date(d.getFullYear(), d.getMonth() - 1, 1)); }
+
   var api = window.TDSLeaderboard = {
     ready: false,
+    uid: function () { return null; },
+    monthKey: monthKey,
+    prevMonthKey: prevMonthKey,
     submit: function () { return Promise.resolve(); },
     top: function () { return Promise.resolve([]); },
+    submitMonthly: function () { return Promise.resolve(); },
+    // resolves null on FAILURE and [] on a genuinely empty board — callers granting
+    // rewards must treat null as "retry later", never as "nobody played".
+    topMonthly: function () { return Promise.resolve(null); },
   };
 
-  if (typeof firebase === 'undefined' || !firebase.apps || !firebase.apps.length || !firebase.firestore) return;
+  var cap = window.Capacitor;
+  var native = !!(cap && cap.isNativePlatform && cap.isNativePlatform());
+  var FStore = cap && cap.Plugins && cap.Plugins.FirebaseFirestore;
 
-  var db;
-  try { db = firebase.firestore(); } catch (e) { return; }
+  // ── backend: set(path, data) + top(collectionPath, field, n) ────────────────────
+  var backend = null;
+  if (native && FStore) {
+    backend = {
+      set: function (path, data) { return FStore.setDocument({ reference: path, data: data, merge: true }); },
+      top: function (path, field, n) {
+        return FStore.getCollection({
+          reference: path,
+          queryConstraints: [
+            { type: 'orderBy', fieldPath: field, directionStr: 'desc' },
+            { type: 'limit', limit: n },
+          ],
+        }).then(function (r) {
+          return (r && r.snapshots ? r.snapshots : []).map(function (s) { return s.data; });
+        });
+      },
+    };
+  } else if (typeof firebase !== 'undefined' && firebase.apps && firebase.apps.length && firebase.firestore) {
+    var db;
+    try { db = firebase.firestore(); } catch (e) { db = null; }
+    if (db) backend = {
+      set: function (path, data) {
+        var p = path.split('/'), ref = db.collection(p[0]).doc(p[1]);
+        for (var i = 2; i < p.length; i += 2) ref = ref.collection(p[i]).doc(p[i + 1]);
+        return ref.set(data, { merge: true });
+      },
+      top: function (path, field, n) {
+        var p = path.split('/'), col = db.collection(p[0]);
+        for (var i = 1; i < p.length; i += 2) col = col.doc(p[i]).collection(p[i + 1]);
+        return col.orderBy(field, 'desc').limit(n).get()
+          .then(function (snap) { var out = []; snap.forEach(function (d) { out.push(d.data()); }); return out; });
+      },
+    };
+  }
+  if (!backend) return;
 
   function uid() {
     if (window.TDSCloud && TDSCloud.uid) return TDSCloud.uid;
     try { return firebase.auth && firebase.auth().currentUser && firebase.auth().currentUser.uid; } catch (e) { return null; }
   }
-
+  api.uid = uid;
   api.ready = true;
 
-  // Write/refresh this player's row. `score` should be the player's BEST score (monotonic), so a
-  // plain merge-set is safe — it never lowers a stored score in practice.
+  var platform = (cap && cap.getPlatform && cap.getPlatform()) || 'web';
+
+  // ── ALL-TIME: one row per player, score = best single run (monotonic → merge-set safe) ──
   api.submit = function (name, score) {
     var id = uid();
     if (!id || !(score > 0)) return Promise.resolve();
-    return db.collection('leaderboard').doc(id).set({
+    return Promise.resolve(backend.set('leaderboard/' + id, {
       uid: id,
       name: String(name || 'Player').slice(0, 16),
       score: Math.round(score),
-      platform: (window.Capacitor && Capacitor.getPlatform && Capacitor.getPlatform()) || 'web',
-      updated: firebase.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true }).catch(function () {});
+      platform: platform,
+      updated: Date.now(),
+    })).catch(function () {});
+  };
+  api.top = function (n) {
+    return Promise.resolve(backend.top('leaderboard', 'score', n || 100)).catch(function () { return []; });
   };
 
-  // Top N rows, highest first: [{ uid, name, score }, ...]
-  api.top = function (n) {
-    return db.collection('leaderboard').orderBy('score', 'desc').limit(n || 100).get()
-      .then(function (snap) { var out = []; snap.forEach(function (d) { out.push(d.data()); }); return out; })
-      .catch(function () { return []; });
+  // ── MONTHLY CONTEST: one row per player per month, total = sum of run scores (monotonic) ──
+  api.submitMonthly = function (name, total, month) {
+    var id = uid(), m = month || monthKey();
+    if (!id || !(total > 0)) return Promise.resolve();
+    return Promise.resolve(backend.set('monthly/' + m + '/scores/' + id, {
+      uid: id,
+      name: String(name || 'Player').slice(0, 16),
+      total: Math.round(total),
+      month: m,
+      platform: platform,
+      updated: Date.now(),
+    })).catch(function () {});
+  };
+  api.topMonthly = function (month, n) {
+    return Promise.resolve(backend.top('monthly/' + (month || monthKey()) + '/scores', 'total', n || 100))
+      .catch(function () { return null; });
   };
 })();
