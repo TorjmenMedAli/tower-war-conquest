@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Tower Destiny Survive</string>
-    <string name="title_activity_main">Tower Destiny Survive</string>
+    <string name="app_name">Zombie Tower Defense</string>
+    <string name="title_activity_main">Zombie Tower Defense</string>
     <string name="package_name">com.TDS.zombietowerdefense</string>
     <string name="custom_url_scheme">com.TDS.zombietowerdefense</string>
     <!-- Play Games Services numeric App ID (Play Console → Play Games Services → Configuration).

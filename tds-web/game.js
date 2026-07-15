@@ -1,4 +1,4 @@
-/* Tower Destiny Survive — Castle Defense build
+/* Zombie Tower Defense — Castle Defense build
    The CASTLE is the hero: it stands fixed on the left, enemies siege it from the
    right. Two mounted weapons + your chosen hero auto-fire. You earn POINTS in the
    battle and spend them to summon SPECIAL FORCES (allied units / airstrike).
@@ -105,11 +105,32 @@ const tankCost = lv => Math.round((140 + (lv - 1) * 140) * PLAY_GRIND);
 const HEROES = [
   { id: 'tank',    name: 'Battle Tank',  rarity: 'Legendary',tank: true },
 ];
-// Append the Hero Squad (procedural HeroSquad art) — added to the playable roster.
-if (window.HeroSquad) HeroSquad.ROSTER.forEach((h, i) => HEROES.push({
-  id: 'sq_' + h.id, name: h.name, rarity: h.rarity, squad: true, sIdx: i, atk: h.atk,
-  dmg: h.dmg, rate: h.rate, range: h.range, spd: h.spd, splash: h.splash || 0,
-}));
+// ── RANK HEROES (primary roster) — the 10 upgradeable soldiers imported from the Claude Design
+// project "Tower Defense Characters" (ranks-art.js → TDSRenderer). Combat profile derives from
+// each rank's weapon; the art is drawn LIVE with a separately-AIMED gun (see drawHero).
+const RANK_GUN = {
+  pistol:  { dmg: 16, rate: 2.0, range: 0.95, spd: 1000, splash: 0 },
+  mpistol: { dmg: 14, rate: 3.0, range: 0.90, spd: 1000, splash: 0 },
+  smg:     { dmg: 13, rate: 4.2, range: 0.85, spd: 1050, splash: 0 },
+  shotgun: { dmg: 34, rate: 1.2, range: 0.60, spd: 900,  splash: 40 },
+  rifle:   { dmg: 22, rate: 3.0, range: 1.00, spd: 1150, splash: 0 },
+  dmr:     { dmg: 46, rate: 1.1, range: 1.25, spd: 1400, splash: 0 },
+  lmg:     { dmg: 18, rate: 4.5, range: 1.00, spd: 1150, splash: 0 },
+  glrifle: { dmg: 30, rate: 1.8, range: 1.05, spd: 950,  splash: 55 },
+  hmg:     { dmg: 24, rate: 5.0, range: 1.05, spd: 1200, splash: 0 },
+  minigun: { dmg: 16, rate: 8.0, range: 0.95, spd: 1250, splash: 0 },
+};
+const RANK_RARITY = ['Common','Common','Common','Rare','Rare','Rare','Epic','Epic','Legendary','Legendary'];
+if (window.TDSRenderer){
+  TDSRenderer.CHARACTERS.forEach((c, i) => { const g = RANK_GUN[c.gun] || RANK_GUN.pistol;
+    HEROES.push({ id: 'rk_' + c.id, name: c.name, rarity: RANK_RARITY[i] || 'Common', rank: true, ci: i, gun: c.gun,
+      dmg: g.dmg, rate: g.rate, range: g.range, spd: g.spd, splash: g.splash }); });
+} else if (window.HeroSquad){                              // fallback roster if ranks-art.js failed to load
+  HeroSquad.ROSTER.forEach((h, i) => HEROES.push({
+    id: 'sq_' + h.id, name: h.name, rarity: h.rarity, squad: true, sIdx: i, atk: h.atk,
+    dmg: h.dmg, rate: h.rate, range: h.range, spd: h.spd, splash: h.splash || 0,
+  }));
+}
 const RARITY_COL = { Common: '#7d8a99', Rare: '#3E97D6', Epic: '#9B5DE0', Legendary: '#F4B731' };
 const RARITY_MULT = { Common: 1.0, Rare: 1.3, Epic: 1.7, Legendary: 2.2 };   // pricier (rarer) heroes hit harder
 const rarityMult = h => RARITY_MULT[h && h.rarity] || 1;
@@ -122,18 +143,9 @@ const HERO_UNLOCK_COIN = { Common: 5000, Rare: 12000, Epic: 24000, Legendary: 40
 // NEXT level's hero (a first-clear popup announces it). Clearing the LAST level unlocks the
 // Battle Tank as the grand-finale hero. Heroes are earned ONLY by playing (no shop unlock).
 // Order ramps by rarity so the reward grows with the challenge.
-const HERO_BY_LEVEL = [
-  'sq_rifleman',   // L1  Common   (starter — owned from the start)
-  'sq_scout',      // L2  Common
-  'sq_pyro',       // L3  Rare
-  'sq_riot',       // L4  Rare
-  'sq_archer',     // L5  Rare
-  'sq_knight',     // L6  Epic
-  'sq_juggernaut', // L7  Epic
-  'sq_jet',        // L8  Epic
-  'sq_mage',       // L9  Legendary
-  'sq_skybomber',  // L10 Legendary
-];
+// derived from the roster: rank heroes (Recruit → Juggernaut) in tier order, one per level
+// (falls back to the Hero Squad ids automatically if the rank renderer isn't loaded).
+const HERO_BY_LEVEL = HEROES.filter(h => !h.tank).slice(0, LEVELS.length).map(h => h.id);
 const HERO_FINALE = 'tank';                              // unlocked by clearing the final level
 const STARTER_HERO = HERO_BY_LEVEL[0];
 const STAR_MILESTONE = 3, STAR_REWARD_GEMS = 15;         // every 3 total campaign stars → a gem reward (mastery track)
@@ -175,6 +187,10 @@ const HERO_BULLET = {
   sq_archer:'arrow', sq_knight:'bolt', sq_juggernaut:'slug', sq_jet:'plasma',
   sq_mage:'arcane', sq_skybomber:'bomblet',
 };
+// rank heroes get a bullet style per WEAPON (pistol tracer → glowing minigun stream)
+const GUN_BULLET = { pistol:'bolt', mpistol:'bolt', smg:'spark', shotgun:'slug', rifle:'bolt',
+  dmr:'arrow', lmg:'spark', glrifle:'bomblet', hmg:'slug', minigun:'fire' };
+HEROES.forEach(h => { if (h.rank) HERO_BULLET[h.id] = GUN_BULLET[h.gun] || 'bolt'; });
 function heroBullet(h){ return BULLETS[HERO_BULLET[h && h.id]] || BULLETS.bolt; }
 
 // ── HERO MASTERY ─────────────────────────────────────────────────────────────
@@ -237,6 +253,14 @@ function paintHero(box, h, pngClass, tokenClass){
   box.style.setProperty('--rc', rc);
   box.classList.toggle('is-tank', !!h.tank);   // only the tank keeps the loadout zoom transform; other heroes are pre-fitted by fitHeroSvg
   if (h.tank && window.TankArt){ box.innerHTML = TankArt.svg(Meta.tankLvl, 'h' + (++_svgUid), false); return; }   // tank already fills its portrait
+  if (h.rank && window.TDSRenderer){                       // rank hero — render an idle pose to a crisp canvas portrait
+    const c = document.createElement('canvas'); c.width = 256; c.height = 256;
+    const cc = c.getContext('2d');
+    cc.translate(38, 4);                                   // the figure sits left-of-centre in frame space; centre it
+    TDSRenderer.drawFrame(cc, 248, h.ci, 'idle', 0.25);
+    c.style.cssText = 'width:100%;height:100%;display:block;object-fit:contain';
+    box.innerHTML = ''; box.appendChild(c); return;
+  }
   if (h.squad && window.HeroSquad){ box.innerHTML = HeroSquad.svg(h.sIdx, 'h' + (++_svgUid), false, 'walk', 0.12); fitHeroSvg(box); return; }
   if (window.HeroArt && HeroArt.CFG[h.id]){ box.innerHTML = HeroArt.svg(h.id, 'h' + (++_svgUid)); fitHeroSvg(box); return; }
   box.innerHTML = `<div class="${tokenClass || 'hero-token'}">${HERO_EMOJI[h.id] || '🦸'}</div>`;
@@ -273,11 +297,16 @@ const FORCES = [
   { id: 'doc',    name: 'DOC VEGA',     icon: '🎩', cost: 18, kind: 'unit', hp: 85, dmg: 20, rate: 2.0, range: 0.78, spd: 820,  splash: 50,
     art: 'doc',    evo: 'outlaw',  evoName: 'MAD OUTLAW', evoDmg: 40, evoRate: 1.4, evoSplash: 70, col: '#c0563a' },
   { id: 'airstrike', name: 'AIRSTRIKE', icon: '💥', cost: 24, kind: 'strike', dmg: 70, col: '#F4B731' },
+  // ── air support wing: three distinct attack planes (strike-kind, like the airstrike) ──
+  { id: 'jetstrike', name: 'JET STRAFE', icon: '🛩️', cost: 16, kind: 'strike', plane: 'jet',     dmg: 26, col: '#4db4ff' },   // fast pass, rapid gun run across the field
+  { id: 'gunship',   name: 'GUNSHIP',    icon: '✈️', cost: 30, kind: 'strike', plane: 'gunship', dmg: 34, col: '#9B5DE0' },   // slow heavy pass, aimed plasma fire
+  { id: 'napalm',    name: 'NAPALM RUN', icon: '🔥', cost: 22, kind: 'strike', plane: 'napalm',  dmg: 30, col: '#ff7a2a' },   // fire canisters → burning ground zones
 ];
 const sfLevel = id => Meta.sfLvl[id] || 1;
 // Forces are UNLOCKED ONE BY ONE: the Ranger is free from the start, the rest are bought with
 // coins (kept cheap). Each force's FIRST upgrade (Lv 1→2) can be paid in coins OR a rewarded ad.
-const SF_BUY = { ranger: 0, kate: 200, doc: 350, airstrike: 500 };   // cheap FLAT coin unlock cost per force (no grind multiplier)
+const SF_BUY = { ranger: 0, kate: 200, doc: 350, airstrike: 500,
+  jetstrike: 0, gunship: 0, napalm: 0 };                             // cheap FLAT coin unlock cost per force (planes FREE for testing)
 const sfBuyCost = id => (SF_BUY[id] != null ? SF_BUY[id] : 300);
 const sfOwned = id => (Meta.sfOwned || []).includes(id);
 
@@ -295,6 +324,7 @@ const Meta = {
   sound: true, stars: {}, ftue: 0, starClaimed: 0,       // sound on/off · best stars per level · first-time-hint bitmask · star-track milestones claimed
   pticket: PT_MAX, pticketAt: 0,                         // play tickets (battle entry) · regen anchor timestamp
   wagon: 0, noAds: false, boostUntil: 0, energy: 0, tickets: 0, rated: false,   // rated: tapped the 5★ prompt (pays coins once, then stops nagging)
+  ratePicked: false,                                     // gave a star rating in the picker popup (stops re-asking)
   endlessBest: 0,                                        // best score in Endless / boss-rush mode (post-campaign)
   bestScore: 0,                                          // best single-run score (feeds the global leaderboard)
   name: '',                                              // leaderboard nickname (chosen once)
@@ -320,7 +350,7 @@ const Meta = {
     wagon:Meta.wagon, noAds:Meta.noAds, boostUntil:Meta.boostUntil, energy:Meta.energy, tickets:Meta.tickets,
     dailyDay:Meta.dailyDay, adDay:Meta.adDay, adChestUsed:Meta.adChestUsed, adCoinUsed:Meta.adCoinUsed, adGemUsed:Meta.adGemUsed,
     streak:Meta.streak, streakDay:Meta.streakDay, heroesOwned:Meta.heroesOwned,
-    sound:Meta.sound, stars:Meta.stars, ftue:Meta.ftue, starClaimed:Meta.starClaimed, pticket:Meta.pticket, pticketAt:Meta.pticketAt, rated:Meta.rated,
+    sound:Meta.sound, stars:Meta.stars, ftue:Meta.ftue, starClaimed:Meta.starClaimed, pticket:Meta.pticket, pticketAt:Meta.pticketAt, rated:Meta.rated, ratePicked:Meta.ratePicked,
     endlessBest:Meta.endlessBest, bestScore:Meta.bestScore, name:Meta.name, wagonCapMig:Meta.wagonCapMig, sv:Meta.sv })); } catch(e){} },
   // castle stats — upgrading HP / the castle stage make the castle tankier
   heroMaxHp(){ return 430 + (Meta.hp - 1) * 70; },                          // hero core — the LAST line of defence (bigger base so a fresh run lasts ~1 min+)
@@ -488,7 +518,7 @@ const FROST_DUR = 3.2, FROST_SLOW = 0.32;
 const HERO_HURT_DUR = 0.45;                              // how long the hero plays its hurt anim after the convoy is hit
 const state = {
   screen: 'menu', energy: 0, score: 0, paused: false, over: false, won: false,
-  castle: null, enemies: [], allies: [], shots: [], eshots: [], pops: [], parts: [], zones: [], props: [], bombs: [], plane: null, frost: 0,
+  castle: null, enemies: [], allies: [], shots: [], eshots: [], pops: [], parts: [], zones: [], props: [], bombs: [], plane: null, planes: [], frost: 0,
   wpn: [], heroCd: 0, heroAng: -0.3, tankFire: 0, heroFire: 0, heroHurt: 0, heroDeadAt: 0, boss: null, bossDead: false, bossT: 0,
   spawnT: 0, interval: 2.2, energyAcc: 0, scroll: 0, t: 0, levelTypes: [],
 };
@@ -676,7 +706,7 @@ function startRun(){
   if (bank){ Meta.energy = 0; Meta.save(); }
   Object.assign(state, { energy: bank, score: 0, paused: false, over: false, won: false, level: lv,
     ult: 0, ultReady: false, kills: 0,   // state.endless is set by the caller (startEndless=true, selectLevel=false) and preserved across a retry
-    enemies: [], allies: [], shots: [], eshots: [], pops: [], parts: [], zones: [], props: [], bombs: [], plane: null, fxAcc: 0, frost: 0,
+    enemies: [], allies: [], shots: [], eshots: [], pops: [], parts: [], zones: [], props: [], bombs: [], plane: null, planes: [], fxAcc: 0, frost: 0,
     boss: null, bossDead: false, bossT: 0, heroHurt: 0, heroDeadAt: 0,
     fort: null, fortDead: false, fortT: 0,
     levelTypes: levelEnemyTypes(lv),
@@ -690,6 +720,7 @@ function startRun(){
   state.wpn = Meta.weapons.map(() => ({ cd: 0, ang: -0.3, flash: 0 }));
   const rhero = HEROES[Meta.hero - 1] || HEROES[0];
   if (rhero.tank){ tankFireImage(Meta.tankLvl); for (let i = 0; i < TANK_FRAMES; i++) tankMoveImage(Meta.tankLvl, i); }
+  else if (rhero.rank){ /* rank heroes are drawn live by TDSRenderer — nothing to preload */ }
   else if (rhero.squad){                                          // preload every frame so the sprite never blanks mid-cycle
     const atkAnim = rhero.atk === 'melee' ? 'attack' : (rhero.atk === 'bomb' ? 'bomb' : 'shoot');
     for (let i = 0; i < 6; i++){ squadRaster(rhero.sIdx, 'walk', i, 6); squadRaster(rhero.sIdx, atkAnim, i, 6); squadRaster(rhero.sIdx, 'hurt', i, 6); }
@@ -723,7 +754,13 @@ function deployForce(f){
   if (!sfOwned(f.id)) return;                             // locked forces can't be deployed
   if (state.energy < f.cost) return;
   const lvl = sfLevel(f.id);
-  if (f.kind === 'strike'){ setEnergy(state.energy - f.cost); airstrike(lvl); return; }   // airstrike: no cap
+  if (f.kind === 'strike'){
+    if (f.plane){                                          // support planes: one of each kind airborne at a time
+      if (state.planes.some(pl => pl.kind === f.plane)){ popup(W * 0.5, groundY() - 150 * S(), 'ALREADY AIRBORNE', '#ff8a4a'); return; }
+      setEnergy(state.energy - f.cost); spawnSupportPlane(f, lvl); return;
+    }
+    setEnergy(state.energy - f.cost); airstrike(lvl); return;   // classic airstrike: no cap
+  }
   // cap deployed unit-forces on the field at once (airstrike is exempt, handled above)
   if (state.allies.filter(a => !a.dead).length >= SF_FIELD_MAX){ popup(W * 0.5, groundY() - 150 * S(), 'MAX ' + SF_FIELD_MAX + ' FORCES', '#ff8a4a'); return; }
   setEnergy(state.energy - f.cost);
@@ -743,10 +780,16 @@ function spawnAlly(f, lvl){
   const col = slot % 2, row = (slot / 2) | 0;
   const x = Math.min(W - 40 * s, heroPos().x + (24 + col * 40 + row * 10) * s);   // combat anchor (front line)
   const y = groundY();
-  // visual: seat forces just behind/beside the hero, CLAMPED to ≤40% of the screen so they never
-  // drift out into the scene. Drawn after the hero (see render) so they're always visible.
-  const vx = Math.min(W * 0.40, Math.max(30 * s, heroPos().x - (18 + col * 22 + row * 8) * s));
-  const vy = groundY() - (14 + row * 13) * s;                                     // visual: slight far-lane stagger (2.5D) — rows step upward
+  // visual: the FIRST pair (slots 0-1) tucks in just behind the hero; the SECOND pair (slots 2-3)
+  // marches AHEAD of the hero, leading the convoy. Drawn after the hero so they're always visible.
+  let vx, vy;
+  if (row === 0){                                                                 // pair 1: behind the hero (unchanged spot)
+    vx = Math.min(W * 0.40, Math.max(30 * s, heroPos().x - (18 + col * 22) * s));
+    vy = groundY() - 14 * s;
+  } else {                                                                        // pair 2: in front of the hero
+    vx = Math.min(W * 0.52, heroPos().x + (48 + col * 30) * s);
+    vy = groundY() - 14 * s;                                                      // same lane height as every other force
+  }
   const evolved = lvl >= SF_EVOLVE && f.evo;                                          // past the threshold it becomes its upgraded hero
   const art = evolved ? f.evo : f.art;
   const dmg0 = evolved ? f.evoDmg : f.dmg, rate0 = evolved ? f.evoRate : f.rate, splash0 = evolved ? (f.evoSplash || 0) : (f.splash || 0);
@@ -773,8 +816,32 @@ function airstrike(lvl){
   state.plane = { x: -150 * s, y: (140 + Math.random() * 14) * s, vx: (W + 320 * s) / 1.5, dmg, dropXs, di: 0, prop: 0 };
   flash();
 }
+// ── SUPPORT PLANES ───────────────────────────────────────────────────────────
+// Unlike the airstrike (a one-shot fly-by), these fly in and LOITER ABOVE THE TOWER, attacking
+// from there for a support window, then fly off. One of each kind airborne at a time.
+const PLANE_DUR = 10;                                      // seconds on station above the tower
+function spawnSupportPlane(f, lvl){
+  SFX.play('strike');
+  const s = S(), mult = (1 + 0.3 * (lvl - 1)) * Meta.dmgMult();
+  // altitude = the ULTIMATE button's height band (bottom:520px, 66px tall → centre H-553),
+  // with a small per-kind stagger so the three planes never overlap each other
+  const altOff = { jet: -24, gunship: 2, napalm: 26 }[f.plane] || 0;
+  state.planes.push({
+    kind: f.plane, dmg: f.dmg * mult,
+    x: -140 * s, y: Math.max(90 * s, H - 553 + altOff * s),   // clamp for very short screens
+    anchor: 0,                                            // set each frame: hover point above the wagon/tower
+    vx: 0, ph: Math.random() * 6, cd: 0.5, life: PLANE_DUR, leaving: false, prop: 0, tr: null, flash: 0,
+  });
+}
 function bombBlast(b){
   const s = S(), gy = groundY();
+  if (b.fire){                                             // napalm canister → ignite a burning ground zone
+    SFX.play('tank');
+    for (let k = 0; k < 14; k++) burst(b.x + (Math.random() - 0.5) * 40 * s, gy - Math.random() * 30 * s, k % 2 ? '#ff7a1a' : '#ffd24a');
+    state.zones.push({ x: b.x, y: gy, r: 66 * s, dps: b.dps, life: 4.0, tick: 0, fire: true });
+    for (const e of state.enemies){ if (!e.dead && Math.abs(e.x - b.x) < 66 * s) hurt(e, b.dmg, '#ff7a1a'); }
+    return;
+  }
   SFX.play('tank');
   for (let k = 0; k < 18; k++) burst(b.x + (Math.random() - 0.5) * 30 * s, gy - Math.random() * 46 * s, k % 3 ? '#ffb142' : '#fff3c0');
   for (let k = 0; k < 6; k++) state.parts.push({ x: b.x, y: gy - 14 * s, vx: (Math.random() - 0.5) * 90 * s, vy: -Math.random() * 130 * s,
@@ -1103,7 +1170,7 @@ function tallyGameAndStreak(){
     if (Meta.unlocked >= 10) window.TDSGames.unlock('level_10');
     if ((Meta.games | 0) >= 25) window.TDSGames.unlock('veteran');
   }
-  if (Meta.games % 10 === 0) queueRating();     // nudge a 5★ rating every 10 battles
+  if (Meta.games % rateEvery() === 0) queueRating();   // rating popups every N games (remote-config cadence, default 5)
   if (Meta.games % 4 === 0){
     pendingRewards.push({
       icon: ICON_GIFT, accent: '#4a90e2',
@@ -1148,7 +1215,50 @@ function drainRewards(done){
 let ratingPending = false;
 const STORE_URL = 'https://play.google.com/store/apps/details?id=com.TDS.zombietowerdefense';   // TODO: replace with your real store link
 const RATE_REWARD = 1000;
-function queueRating(){ if (!Meta.rated) ratingPending = true; }
+// ── rating popups: REMOTE-CONFIG gated (flip on/off from the Firebase console any time) ──
+//   rate_popup_enabled        → popup 1: star picker (4-5★ → store page, 1-3★ → thank you)
+//   rate_reward_popup_enabled → popup 2: "give us 5 stars and get 1000 coins"
+//   rate_popup_every          → cadence in games played (default 5)
+const RC = () => window.TDSRemoteConfig;
+function rateEvery(){ const n = RC() ? RC().getNumber('rate_popup_every') : 5; return n > 0 ? n : 5; }
+function ratePopup1On(){ return RC() ? RC().getBool('rate_popup_enabled') : true; }
+function ratePopup2On(){ return RC() ? RC().getBool('rate_reward_popup_enabled') : true; }
+function queueRating(){ if (!Meta.rated || !Meta.ratePicked) ratingPending = true; }
+// popup 1 — the star picker. done(lowRating) continues the flow; lowRating skips popup 2 this cycle.
+function showRateStars(done){
+  const modal = $('rateStarsModal'); if (!modal){ done(false); return; }
+  const stars = Array.from(modal.querySelectorAll('.rate-stars button'));
+  const title = $('rsTitle'), sub = $('rsSub'), ok = $('rsOk'), close = $('rsClose'), row = $('rsStars');
+  title.textContent = 'ENJOYING THE GAME?'; sub.textContent = 'How many stars would you give us?';
+  row.style.display = ''; ok.style.display = 'none'; close.style.display = '';
+  stars.forEach(b => b.classList.remove('lit'));
+  let picked = false;
+  const finish = (low) => { modal.classList.remove('active'); done(!!low); };
+  stars.forEach(b => b.onclick = () => {
+    if (picked) return; picked = true;
+    const n = +b.dataset.star;
+    stars.forEach(s => s.classList.toggle('lit', +s.dataset.star <= n));
+    if (window.TDSAnalytics) TDSAnalytics.log('rate_stars', { stars: n });
+    Meta.ratePicked = true; Meta.save();
+    setTimeout(() => {
+      if (n >= 4){ try { window.open(STORE_URL, '_blank'); } catch (e) {} finish(false); }
+      else {                                              // low rating → thank them, no store push
+        row.style.display = 'none'; close.style.display = 'none';
+        title.textContent = 'THANK YOU! ❤️'; sub.textContent = 'Thanks for your feedback — we keep improving the game!';
+        ok.style.display = ''; ok.onclick = () => finish(true);
+      }
+    }, 420);
+  });
+  close.onclick = () => finish(false);
+  SFX.play('chest');
+  modal.classList.add('active');
+}
+// every rate_popup_every games: popup 1 (star picker) → popup 2 (5★ = 1000 coins) → continue
+function showRatingFlow(done){
+  const p2 = () => { if (ratePopup2On() && !Meta.rated) showRatingModal(done); else done(); };
+  if (ratePopup1On() && !Meta.ratePicked) showRateStars(low => { if (low) done(); else p2(); });
+  else p2();
+}
 function showRatingModal(done){
   const modal = $('rateModal'); if (!modal){ done && done(); return; }
   const goodies = $('rateGoodies'); if (goodies) goodies.innerHTML = `<span class="rpill coin">${ICON_COIN}+${RATE_REWARD}</span>`;
@@ -1167,7 +1277,7 @@ function proceed(action){
   closeResultModals();
   drainRewards(() => {
     const go = () => { if (action === 'retry') startRun(); else show('menu'); };
-    if (ratingPending && !Meta.rated){ ratingPending = false; showRatingModal(go); } else go();
+    if (ratingPending){ ratingPending = false; showRatingFlow(go); } else go();
   });
 }
 
@@ -1255,8 +1365,7 @@ function levelComplete(){
     }
   }
   queueLevelReward(state.level, advanced);     // reward for the level achieved
-  tallyGameAndStreak();                        // also counts toward the every-4-games chest
-  queueRating();                               // nudge a 5★ rating after clearing a level
+  tallyGameAndStreak();                        // also counts toward the every-4-games chest (and the every-N-games rate prompt)
   Meta.save();
   $('vicCoins').textContent = reward;
   paintStars(state.winStars);
@@ -1343,7 +1452,9 @@ function update(dt){
     state.heroAng = Math.atan2((hp_.y - 44 * hcs) - ht.y, ht.x - hp_.x);
     if (state.heroCd <= 0){
       if (hero.tank){ state.heroCd = TANK_RELOAD; fireTankCannon(ht); }
-      else { state.heroCd = 1 / (hero.rate || 2); fireShot(hp_.x + 28 * hcs, hp_.y - 78 * hcs, ht, heroDmg(hero), hero.spd || 950, (hero.splash || 0) * s, heroBullet(hero)); state.heroFire = 0.12; }
+      else { state.heroCd = 1 / (hero.rate || 2);
+        const my = hero.rank ? 60 * hcs : 78 * hcs;        // rank soldiers hold the gun lower than the tall squad figures
+        fireShot(hp_.x + 28 * hcs, hp_.y - my, ht, heroDmg(hero), hero.spd || 950, (hero.splash || 0) * s, heroBullet(hero)); state.heroFire = 0.12; }
     }
   }
 
@@ -1392,7 +1503,7 @@ function update(dt){
 
   // toxic clouds (unused by default — kept for future forces)
   for (const z of state.zones){ z.life -= dt; z.tick -= dt;
-    if (z.tick <= 0){ z.tick = 0.25; for (const e of state.enemies) if (!e.dead && Math.hypot(e.x - z.x, e.y - z.y) < z.r) hurt(e, z.dps * 0.25 * Meta.dmgMult(), '#9be23a'); } }
+    if (z.tick <= 0){ z.tick = 0.25; for (const e of state.enemies) if (!e.dead && Math.hypot(e.x - z.x, e.y - z.y) < z.r) hurt(e, z.dps * 0.25 * Meta.dmgMult(), z.fire ? '#ff7a1a' : '#9be23a'); } }
 
   // projectiles — sub-stepped so a fast shot collides WHERE it's drawn (never teleports past), and the
   // bullet is kept ONE extra frame at its impact point so its tracer is drawn reaching the enemy on the
@@ -1448,6 +1559,41 @@ function update(dt){
     }
     if (pl.x > W + 170 * s) state.plane = null;
   }
+
+  // support planes: fly in, hold station ABOVE THE TOWER (gentle patrol), attack, then leave
+  for (const pl of state.planes){
+    pl.prop += dt * 46; pl.ph += dt; pl.cd -= dt; if (pl.flash > 0) pl.flash -= dt;
+    if (pl.tr){ pl.tr.life -= dt; if (pl.tr.life <= 0) pl.tr = null; }
+    pl.anchor = heroPos().x - 60 * s + Math.sin(pl.ph * (pl.kind === 'jet' ? 2.2 : 0.9)) * (pl.kind === 'jet' ? 88 : 40) * s;   // hover over the wagon/tower
+    if (!pl.leaving){
+      pl.life -= dt; if (pl.life <= 0){ pl.leaving = true; }
+      pl.x += (pl.anchor - pl.x) * Math.min(1, dt * 2.4);                      // ease onto / around station
+      pl.y += Math.sin(pl.ph * 1.7) * 5 * s * dt;                              // soft altitude bob
+      // ---- attacks (only once on station) ----
+      const onSta = Math.abs(pl.x - pl.anchor) < 120 * s;
+      if (onSta && pl.cd <= 0){
+        if (pl.kind === 'jet'){                                                // rapid strafing bursts at the nearest enemy
+          const t = nearestEnemy(pl.x, pl.y, W * 0.9);
+          if (t){ pl.cd = 0.12; pl.flash = 0.05;
+            pl.tr = { x2: t.x, y2: aimY(t), life: 0.06 };
+            hurt(t, pl.dmg * 0.18, '#4db4ff');
+          } else pl.cd = 0.2;
+        } else if (pl.kind === 'gunship'){                                     // heavy aimed plasma shells
+          const t = nearestEnemy(pl.x, pl.y, W);
+          if (t){ pl.cd = 0.45; pl.flash = 0.08; fireShot(pl.x + 26 * s, pl.y + 9 * s, t, pl.dmg, 1350, 26 * s, BULLETS.plasma); }
+          else pl.cd = 0.3;
+        } else if (pl.kind === 'napalm'){                                      // fire canister ahead of the tower → burning zone
+          const t = nearestEnemy(pl.x, pl.y, W);
+          const tx = t ? Math.max(frontLine() + 60 * s, Math.min(W * 0.92, t.x)) : W * 0.6;
+          pl.cd = 1.6;
+          state.bombs.push({ x: tx, y: pl.y + 10 * s, vy: 430 * s, dmg: pl.dmg * 0.6, fire: true, dps: pl.dmg * 0.5, hit: false });
+        }
+      }
+    } else {
+      pl.x += (900 * s) * dt; pl.y -= 30 * s * dt;                             // support window over → climb out to the right
+    }
+  }
+  state.planes = state.planes.filter(pl => pl.x < W + 220 * s);
   // airstrike bombs fall and detonate on impact
   for (const b of state.bombs){ b.y += b.vy * dt; if (!b.hit && b.y >= groundY() - 4 * s){ b.hit = true; bombBlast(b); } }
   state.bombs = state.bombs.filter(b => !b.hit);
@@ -1706,6 +1852,28 @@ function drawHero(){
     }
     drawHeroToken(cx, by, h, hero); return;
   }
+  // Rank hero — drawn LIVE by TDSRenderer with a separately-attached gun that ROTATES TO AIM at
+  // the hero's current target (state.heroAng is y-up; canvas rotation is y-down → negate).
+  if (hero.rank && window.TDSRenderer){
+    let anim, t;
+    if (state.over && !state.won){ anim = 'die'; t = Math.min(0.999, (state.t - (state.heroDeadAt || state.t)) / 1.3); }
+    else if (state.heroHurt > 0){ anim = 'hit'; t = Math.min(0.999, 1 - Math.max(0, state.heroHurt) / HERO_HURT_DUR); }
+    else if (state.heroFire > 0 || state.heroCd > 0 && state.heroCd < 0.18){ anim = 'shoot'; t = (state.t * 1.1) % 1; }
+    else { anim = 'walk'; t = (state.t * 0.85) % 1; }
+    const size = 148 * s, k = size / 128;
+    const ox = cx - 46 * k, oy = by - 116 * k + (anim === 'die' ? 0 : bob);   // frame ground line (y=116) sits on the street
+    ctx.save(); ctx.translate(ox, oy);
+    TDSRenderer.drawFrame(ctx, size, hero.ci, anim, t, { gun: 'none' });     // body only…
+    const so = TDSRenderer.getSocket(hero.ci, anim, t);                      // …then the gun, rotated to the live aim
+    if (so.visible){
+      const aim = Math.max(-0.9, Math.min(0.45, -(state.heroAng || 0)));
+      ctx.translate(so.x * k, so.y * k); ctx.rotate(so.angle + aim); ctx.scale(so.scale * k, so.scale * k);
+      const G = TDSRenderer.GUNS[hero.gun];
+      G.draw(ctx, anim === 'shoot' ? (state.t * 3) : 0);
+      if (state.heroFire > 0.05){ ctx.translate(G.muz[0], G.muz[1]); TDSRenderer.drawFlash(ctx); }
+    }
+    ctx.restore(); return;
+  }
   // Hero Squad — procedural HeroSquad art (faces right), walk loop + attack burst when firing
   if (hero.squad && window.HeroSquad){
     let anim, fi, NF;
@@ -1817,6 +1985,68 @@ function drawBombs(){
   }
 }
 // airstrike bomber flying over — side view, spinning prop, drops the bombs
+// support planes — three distinct side-view silhouettes loitering above the tower
+function drawSupportPlanes(){
+  const s = S();
+  for (const pl of state.planes){
+    // jet tracer (drawn under the plane)
+    if (pl.tr){ const g = ctx.createLinearGradient(pl.x + 30 * s, pl.y + 8 * s, pl.tr.x2, pl.tr.y2);
+      g.addColorStop(0, 'rgba(140,210,255,.9)'); g.addColorStop(1, 'rgba(140,210,255,0)');
+      ctx.strokeStyle = g; ctx.lineWidth = 2.5 * s; ctx.beginPath(); ctx.moveTo(pl.x + 30 * s, pl.y + 8 * s); ctx.lineTo(pl.tr.x2, pl.tr.y2); ctx.stroke(); }
+    ctx.save(); ctx.translate(pl.x, pl.y);
+    if (pl.kind === 'jet'){
+      ctx.rotate(pl.leaving ? -0.16 : Math.sin(pl.ph * 2.2) * 0.07);                       // banks as it patrols
+      ctx.fillStyle = '#ffb45e';                                                           // afterburner flicker
+      ctx.beginPath(); ctx.moveTo(-34 * s, 0); ctx.lineTo((-46 - Math.random() * 8) * s, 0); ctx.lineTo(-34 * s, 4 * s); ctx.closePath(); ctx.fill();
+      const g = ctx.createLinearGradient(0, -8 * s, 0, 10 * s); g.addColorStop(0, '#9fb6d6'); g.addColorStop(1, '#4a5b74');
+      ctx.fillStyle = g; ctx.strokeStyle = '#26303f'; ctx.lineWidth = 2 * s;
+      ctx.beginPath(); ctx.moveTo(38 * s, 1 * s); ctx.lineTo(6 * s, -7 * s); ctx.lineTo(-34 * s, -4 * s); ctx.lineTo(-34 * s, 5 * s); ctx.lineTo(10 * s, 7 * s); ctx.closePath(); ctx.fill(); ctx.stroke();   // dart fuselage
+      ctx.fillStyle = '#3d4a61'; ctx.beginPath(); ctx.moveTo(4 * s, 0); ctx.lineTo(-16 * s, 16 * s); ctx.lineTo(-26 * s, 15 * s); ctx.lineTo(-6 * s, -1 * s); ctx.closePath(); ctx.fill();               // swept wing
+      ctx.beginPath(); ctx.moveTo(-26 * s, -3 * s); ctx.lineTo(-36 * s, -16 * s); ctx.lineTo(-27 * s, -14 * s); ctx.lineTo(-20 * s, -4 * s); ctx.closePath(); ctx.fill();                                 // tail
+      ctx.fillStyle = '#bfe6ff'; ctx.beginPath(); ctx.ellipse(16 * s, -4 * s, 8 * s, 4 * s, 0, 0, 7); ctx.fill();
+      if (pl.flash > 0){ ctx.fillStyle = '#ffe07a'; ctx.beginPath(); ctx.arc(38 * s, 6 * s, 4.5 * s, 0, 7); ctx.fill(); }
+    } else if (pl.kind === 'gunship'){
+      ctx.rotate(Math.sin(pl.ph * 0.9) * 0.03);
+      const g = ctx.createLinearGradient(0, -14 * s, 0, 14 * s); g.addColorStop(0, '#8a7fb8'); g.addColorStop(1, '#4a4270');
+      ctx.fillStyle = g; ctx.strokeStyle = '#241f38'; ctx.lineWidth = 2.2 * s;
+      ctx.beginPath(); ctx.ellipse(0, 0, 44 * s, 13 * s, 0, 0, 7); ctx.fill(); ctx.stroke();                 // fat fuselage
+      ctx.fillStyle = '#5a5186'; ctx.beginPath(); ctx.moveTo(6 * s, -2 * s); ctx.lineTo(30 * s, 17 * s); ctx.lineTo(42 * s, 17 * s); ctx.lineTo(18 * s, -3 * s); ctx.closePath(); ctx.fill();            // wing
+      for (const ex of [-14, 12]){ ctx.fillStyle = '#3a3358'; ctx.beginPath(); ctx.ellipse(ex * s, 12 * s, 8 * s, 5 * s, 0, 0, 7); ctx.fill();                                                            // twin engines
+        ctx.save(); ctx.translate(ex * s, 12 * s); ctx.rotate(pl.prop); ctx.fillStyle = 'rgba(220,225,245,.4)'; ctx.fillRect(-1.4 * s, -9 * s, 2.8 * s, 18 * s); ctx.restore(); }
+      ctx.fillStyle = '#4a4270'; ctx.beginPath(); ctx.moveTo(-36 * s, -2 * s); ctx.lineTo(-50 * s, -18 * s); ctx.lineTo(-38 * s, -16 * s); ctx.lineTo(-28 * s, -3 * s); ctx.closePath(); ctx.fill();     // tail
+      ctx.fillStyle = '#bfe6ff'; ctx.beginPath(); ctx.ellipse(22 * s, -5 * s, 9 * s, 5 * s, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#2c2745'; ctx.fillRect(18 * s, 6 * s, 16 * s, 4 * s);                                 // chin cannon
+      if (pl.flash > 0){ ctx.fillStyle = '#c9a6ff'; ctx.beginPath(); ctx.arc(36 * s, 8 * s, 6 * s, 0, 7); ctx.fill(); }
+    } else {                                                                                                 // napalm bomber: red-belly prop plane
+      ctx.rotate(Math.sin(pl.ph * 0.9) * 0.04);
+      const g = ctx.createLinearGradient(0, -12 * s, 0, 12 * s); g.addColorStop(0, '#c96a4a'); g.addColorStop(1, '#8a3a24');
+      ctx.fillStyle = g; ctx.strokeStyle = '#3a1810'; ctx.lineWidth = 2.2 * s;
+      ctx.beginPath(); ctx.ellipse(0, 0, 38 * s, 12 * s, 0, 0, 7); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = '#a04a2e'; ctx.beginPath(); ctx.moveTo(2 * s, 0); ctx.lineTo(22 * s, 15 * s); ctx.lineTo(34 * s, 15 * s); ctx.lineTo(14 * s, -1 * s); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#b85838'; ctx.beginPath(); ctx.moveTo(-30 * s, -1 * s); ctx.lineTo(-43 * s, -15 * s); ctx.lineTo(-30 * s, -13 * s); ctx.lineTo(-23 * s, -2 * s); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ffd24a'; ctx.beginPath(); ctx.arc(-6 * s, 1 * s, 5 * s, 0, 7); ctx.fill();           // hazard roundel
+      ctx.fillStyle = '#ff7a1a'; ctx.beginPath(); ctx.arc(-6 * s, 1 * s, 2.6 * s, 0, 7); ctx.fill();
+      ctx.fillStyle = '#bfe6ff'; ctx.beginPath(); ctx.ellipse(16 * s, -5 * s, 8 * s, 5 * s, 0, 0, 7); ctx.fill();
+      ctx.fillStyle = '#2b1610'; ctx.fillRect(-14 * s, 9 * s, 22 * s, 5 * s);                                // canister rack
+      ctx.save(); ctx.translate(40 * s, 0); ctx.rotate(pl.prop); ctx.fillStyle = 'rgba(240,220,205,.42)';
+      ctx.fillRect(-1.6 * s, -11 * s, 3.2 * s, 22 * s); ctx.restore();
+    }
+    ctx.restore();
+  }
+}
+// burning napalm zones — looping flame sheet + ember glow on the ground
+function drawFireZones(){
+  const s = S();
+  for (const z of state.zones){
+    if (!z.fire) continue;
+    const a = Math.min(1, z.life / 0.8);                                       // fade out at the end
+    ctx.globalAlpha = 0.35 * a;
+    ctx.fillStyle = '#ff7a1a'; ctx.beginPath(); ctx.ellipse(z.x, z.y - 2 * s, z.r, 10 * s, 0, 0, 7); ctx.fill();
+    ctx.globalAlpha = a;
+    for (const off of [-0.55, 0, 0.55]) drawFxSheet('fire', z.x + z.r * off, z.y + 2 * s, s * 0.55, 0, 'bottom');
+    ctx.globalAlpha = 1;
+  }
+}
 function drawPlane(){
   if (!state.plane) return;
   const s = S(), pl = state.plane;
@@ -2076,7 +2306,8 @@ function render(){
   // screen (see spawnAlly vx clamp) so they cluster just behind/beside the hero, not mid-scene.
   for (const a of [...state.allies].sort((p, q) => p.y - q.y)) drawAlly(a);
   for (const e of state.enemies) drawZombie(e);
-  drawShots(); drawBombs(); drawPlane(); drawEnemyShots(); drawPopups(); drawFrostOverlay();
+  drawFireZones();
+  drawShots(); drawBombs(); drawPlane(); drawSupportPlanes(); drawEnemyShots(); drawPopups(); drawFrostOverlay();
   if (state.bossT > 0) drawBossBanner();
   if (state.fortT > 0) drawFortBanner();
 }
@@ -2586,7 +2817,8 @@ function refreshWeapons(){
       actions = `<button class="wc-btn buy" data-act="buy"${Meta.coins < w.buy ? ' disabled' : ''}>${w.buy ? `<span class="ico ic-coin"></span>${w.buy}` : 'FREE'}</button>`;
     } else {
       const upg = lvl >= WEAPON_MAX ? `<button class="wc-btn max" disabled>MAX</button>` : `<button class="wc-btn up" data-act="upg"${Meta.coins < weaponCost(lvl) ? ' disabled' : ''}><span class="up-ar">⬆</span><span class="ico ic-coin"></span>${weaponCost(lvl)}</button>`;
-      actions = `<button class="wc-btn eq${equipped ? ' on' : ''}" data-act="equip">${equipped ? 'EQUIPPED' : 'EQUIP'}</button>${upg}`;
+      const adUp = lvl === 1 ? `<button class="wc-btn adup" data-act="adup">▶ FREE</button>` : '';   // first upgrade: rewarded ad
+      actions = `<button class="wc-btn eq${equipped ? ' on' : ''}" data-act="equip">${equipped ? 'EQUIPPED' : 'EQUIP'}</button>${upg}${adUp}`;
     }
     // live combat stats so upgrading shows a number going up (dmg +22%/lvl, rate +5%/lvl — see fire loop)
     const wDmg = Math.round(w.dmg * (1 + 0.22 * (lvl - 1)));
@@ -2600,6 +2832,7 @@ function refreshWeapons(){
     const buy = card.querySelector('[data-act=buy]'); if (buy) buy.addEventListener('click', () => buyWeapon(w.id));
     const eq = card.querySelector('[data-act=equip]'); if (eq) eq.addEventListener('click', () => toggleWeapon(w.id));
     const up = card.querySelector('[data-act=upg]'); if (up) up.addEventListener('click', () => upgradeWeaponId(w.id));
+    const au = card.querySelector('[data-act=adup]'); if (au) au.addEventListener('click', () => upgradeWeaponAd(w.id));
     wrap.appendChild(card);
   }
 }
@@ -2612,6 +2845,8 @@ function toggleWeapon(id){
   Meta.save(); refreshWeapons(); refreshMenu();
 }
 function upgradeWeaponId(id){ const lvl = Meta.wlv[id - 1] || 1; if (lvl >= WEAPON_MAX) return; const c = weaponCost(lvl); if (Meta.coins < c) return; Meta.coins -= c; Meta.wlv[id - 1] = lvl + 1; Meta.save(); refreshWeapons(); refreshMenu(); }
+// FIRST weapon upgrade (Lv 1 → 2) can be earned with a rewarded ad
+function upgradeWeaponAd(id){ if ((Meta.wlv[id - 1] || 1) !== 1) return; playRewardedAd(() => { Meta.wlv[id - 1] = 2; Meta.save(); refreshWeapons(); refreshMenu(); }); }
 
 /* ---------------- Heroes (equip · upgrade) ---------------- */
 function refreshHeroes(){
@@ -2628,8 +2863,9 @@ function refreshHeroes(){
     card.className = 'hero-card' + (eq ? ' equipped' : '') + (owned ? '' : ' locked');
     card.style.setProperty('--rc', rc);
     const upg = maxed ? `<button class="wc-btn max" disabled>MAX</button>` : `<button class="wc-btn up" data-act="upg"${Meta.coins < cost ? ' disabled' : ''}><span class="up-ar">⬆</span><span class="ico ic-coin"></span>${cost}</button>`;
+    const adUp = lvl === 1 ? `<button class="wc-btn adup" data-act="adup">▶ FREE</button>` : '';   // first upgrade: rewarded ad
     const acts = owned
-      ? `<button class="wc-btn eq${eq ? ' on' : ''}" data-act="equip">${eq ? 'EQUIPPED' : 'EQUIP'}</button>${upg}`
+      ? `<button class="wc-btn eq${eq ? ' on' : ''}" data-act="equip">${eq ? 'EQUIPPED' : 'EQUIP'}</button>${upg}${adUp}`
       : `<button class="wc-btn locked" disabled>🔒 CLEAR LEVEL ${heroUnlockLevel(h.id)}</button>`;
     // live damage so upgrading shows a number going up (hero dmg +12%/lvl × rarity; tank 12+fire*12 per tier)
     let hDmg;
@@ -2647,6 +2883,7 @@ function refreshHeroes(){
     paintHero(card.querySelector('.hc-art'), h, 'hero-png');
     const eqBtn = card.querySelector('[data-act=equip]'); if (eqBtn) eqBtn.addEventListener('click', () => selectHero(h.id));
     const up = card.querySelector('[data-act=upg]'); if (up) up.addEventListener('click', () => upgradeHeroId(h.id));
+    const au = card.querySelector('[data-act=adup]'); if (au) au.addEventListener('click', () => upgradeHeroAd(h.id));
     const ug = card.querySelector('[data-act=unlock-gem]'); if (ug) ug.addEventListener('click', () => unlockHero(h.id, 'gems'));
     const uc = card.querySelector('[data-act=unlock-coin]'); if (uc) uc.addEventListener('click', () => unlockHero(h.id, 'coins'));
   });
@@ -2664,6 +2901,12 @@ function upgradeHeroId(id){
   else { const lvl = Meta.heroLvl[id] || 1; if (lvl >= HERO_LVL_MAX) return; const c = heroUpCost(lvl); if (Meta.coins < c) return; Meta.coins -= c; Meta.heroLvl[id] = lvl + 1; }
   Meta.save(); refreshHeroes(); refreshMenu();
 }
+// FIRST hero upgrade (Lv 1 → 2 / tank tier 1 → 2) can be earned with a rewarded ad
+function upgradeHeroAd(id){
+  const h = HEROES.find(x => x.id === id); if (!h || !heroOwned(id)) return;
+  if (heroLevel(h) !== 1) return;
+  playRewardedAd(() => { if (h.tank) Meta.tankLvl = 2; else Meta.heroLvl[id] = 2; Meta.save(); refreshHeroes(); refreshMenu(); });
+}
 
 /* ---------------- Forces screen (castle stats + special-force upgrades) ---------------- */
 function refreshForces(){
@@ -2677,6 +2920,9 @@ function refreshForces(){
   $('forces').querySelector('[data-act=hp]').disabled = Meta.coins < Meta.hpCost();
   $('forces').querySelector('[data-act=dmg]').disabled = Meta.coins < Meta.dmgCost();
   $('forces').querySelector('[data-act=pow]').disabled = Meta.coins < Meta.powCost();
+  // "first upgrade by ad" chips — visible only while the stat is still at its base level
+  { const adf = (act, show) => { const b = $('forces').querySelector(`.adfree[data-adact=${act}]`); if (b) b.style.display = show ? '' : 'none'; };
+    adf('hp', Meta.hp === 1); adf('dmg', Meta.dmg === 1); adf('pow', Meta.pow === 1); adf('wagon', Meta.wagon === 0); }
   // wagon armor upgrade
   $('wagonArt').innerHTML = '<img src="assets/wagon_stage' + (wagonEtage() + 1) + '_intact.png?v=1" alt="wagon" style="width:100%;height:100%;object-fit:contain">';
   $('l_wagon').textContent = 'Lv ' + (Meta.wagon + 1);
@@ -2699,7 +2945,9 @@ function refreshForces(){
     let acts;
     if (!owned){
       const bc = sfBuyCost(f.id);
-      acts = `<button class="wc-btn buy" data-act="buysf"${Meta.coins < bc ? ' disabled' : ''}><span class="ico ic-coin"></span>${bc}</button>`;
+      acts = bc > 0
+        ? `<button class="wc-btn buy" data-act="buysf"${Meta.coins < bc ? ' disabled' : ''}><span class="ico ic-coin"></span>${bc}</button>`
+        : `<button class="wc-btn buy" data-act="buysf">FREE</button>`;
     } else {
       const upg = maxed ? `<button class="wc-btn max" disabled>MAX</button>` : `<button class="wc-btn up" data-act="upg"${Meta.coins < cost ? ' disabled' : ''}><span class="up-ar">⬆</span><span class="ico ic-coin"></span>${cost}</button>`;
       const adUp = (lvl === 1) ? `<button class="wc-btn adup" data-act="adup">▶ FREE</button>` : '';   // first upgrade: rewarded ad
@@ -2740,6 +2988,7 @@ function refreshCastleUpg(){
   const cvv = $('castleCostV'), ic = $('castleCostBox').querySelector('.ic-coin');
   if (Meta.castle >= CASTLE_MAX){ btn.classList.add('max'); btn.disabled = true; cvv.textContent = 'MAX'; ic.style.display = 'none'; }
   else { btn.classList.remove('max'); cvv.textContent = Meta.castleCost(); ic.style.display = ''; btn.disabled = Meta.coins < Meta.castleCost(); }
+  const adc = $('castleUpgAd'); if (adc) adc.style.display = Meta.castle === 0 ? '' : 'none';   // first stage can be earned with an ad
 }
 // cheapest upgradable EQUIPPED weapon — what the menu ⬆ button will level up
 function nextWeaponUp(){
@@ -2802,11 +3051,25 @@ $('streakClaim').addEventListener('click', claimStreak);
 $('streakDouble').addEventListener('click', streakDoubleAd);
 $('streakClose').addEventListener('click', closeStreak);
 $('castleUpg').addEventListener('click', upgradeCastle);
+{ const b = $('castleUpgAd'); if (b) b.addEventListener('click', () => {   // first castle stage via rewarded ad
+    if (Meta.castle !== 0) return;
+    playRewardedAd(() => { Meta.castle = 1; Meta.save(); renderCastle(); refreshCastleUpg(); refreshMenu(); bump($('castleBox')); });
+  }); }
 $('loadWeapon').addEventListener('click', () => show('weapons'));
 $('loadHero').addEventListener('click', () => show('heroes'));
 $('lc_wpnUpg').addEventListener('click', e => { e.stopPropagation(); const cand = nextWeaponUp(); if (cand) upgradeWeaponId(cand.id); });
 $('lc_heroUpg').addEventListener('click', e => { e.stopPropagation(); const h = HEROES[Meta.hero - 1] || HEROES[0]; upgradeHeroId(h.id); });
 // castle stat upgrades live on the Forces screen
+// FIRST upgrade of each castle stat / the wagon can be earned with a rewarded ad (Lv 1 → 2 only)
+document.querySelectorAll('#forces .adfree[data-adact]').forEach(b => b.addEventListener('click', () => {
+  const a = b.dataset.adact;
+  const atBase = a === 'hp' ? Meta.hp === 1 : a === 'dmg' ? Meta.dmg === 1 : a === 'pow' ? Meta.pow === 1 : Meta.wagon === 0;
+  if (!atBase) return;
+  playRewardedAd(() => {
+    if (a === 'hp') Meta.hp = 2; else if (a === 'dmg') Meta.dmg = 2; else if (a === 'pow') Meta.pow = 2; else Meta.wagon = 1;
+    Meta.save(); refreshForces(); refreshMenu();
+  });
+}));
 document.querySelectorAll('#forces .upg[data-act]').forEach(b => b.addEventListener('click', () => {
   const a = b.dataset.act;
   if (a === 'wagon'){ if (Meta.wagon >= WAGON_MAX) return; const c = Meta.wagonCost(); if (Meta.coins < c) return; Meta.coins -= c; Meta.wagon++; Meta.save(); refreshForces(); refreshMenu(); return; }
@@ -2977,6 +3240,7 @@ preload(() => {
   else if (location.hash === '#dbgwin'){ show('game'); state.level = Meta.level = 3; Meta.unlocked = 3; state.castle = { hp: 78, maxHp: 100 }; state.score = 920; levelComplete(); }
   else if (location.hash === '#dbglose'){ show('game'); state.level = 1; state.score = 415; gameOver(); }
   else if (location.hash === '#dbgreward'){ Meta.games = 3; pendingRewards.length = 0; tallyGameAndStreak(); drainRewards(() => {}); }
+  else if (location.hash === '#dbgrate'){ show('menu'); Meta.rated = false; Meta.ratePicked = false; showRatingFlow(() => {}); }   // preview the every-5-games rating popups
   else if (location.hash === '#dbgad'){ $('adCount').textContent = '3'; $('adModal').classList.add('active'); }
   else if (location.hash === '#shopcoins'){ shopTab = 'coins'; show('shop'); }
   else if (location.hash === '#shopgems'){ shopTab = 'gems'; show('shop'); }

@@ -1,0 +1,31 @@
+require_relative '../../node_modules/@capacitor/ios/scripts/pods_helpers'
+
+platform :ios, '13.0'
+use_frameworks!
+
+# workaround to avoid Xcode caching of Pods that requires
+# Product -> Clean Build Folder after new Cordova plugins installed
+# Requires CocoaPods 1.6 or newer
+install! 'cocoapods', :disable_input_output_paths => true
+
+def capacitor_pods
+  pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
+  pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
+  pod 'CapacitorCommunityAdmob', :path => '../../node_modules/@capacitor-community/admob'
+  pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
+  pod 'CapacitorPreferences', :path => '../../node_modules/@capacitor/preferences'
+  pod 'CordovaPlugins', :path => '../capacitor-cordova-ios-plugins'
+end
+
+target 'App' do
+  capacitor_pods
+  # Add your Pods here
+  # UMP 3.x renamed the UMP* Swift APIs that @capacitor-community/admob 6.x still uses.
+  # Local podspec because cdn.jsdelivr.net (CocoaPods trunk CDN) is unreachable on this network.
+  pod 'GoogleUserMessagingPlatform', :podspec => 'GoogleUserMessagingPlatform.podspec.json'
+  pod 'Google-Mobile-Ads-SDK', :podspec => 'Google-Mobile-Ads-SDK.podspec.json'
+end
+
+post_install do |installer|
+  assertDeploymentTarget(installer)
+end

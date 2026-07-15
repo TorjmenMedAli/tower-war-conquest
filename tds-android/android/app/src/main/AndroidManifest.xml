@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="true"
@@ -19,7 +20,8 @@
              Required for achievements + leaderboards. See tds-android/res values/strings.xml. -->
         <meta-data
             android:name="com.google.android.gms.games.APP_ID"
-            android:value="@string/game_services_project_id" />
+            android:value="@string/game_services_project_id"
+            tools:replace="android:value" />
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"

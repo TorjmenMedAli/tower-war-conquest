@@ -5,10 +5,15 @@
   "description": "Tower Destiny Survive — Android app (Capacitor wrapper around the tds-web build)",
   "dependencies": {
     "@capacitor-community/admob": "^6.2.0",
+    "@capacitor-firebase/authentication": "^6.3.1",
+    "@capacitor-firebase/firestore": "^6.3.1",
     "@capacitor/android": "^6.1.2",
     "@capacitor/app": "^6.0.3",
     "@capacitor/core": "^6.1.2",
+    "@capacitor/ios": "^6.2.1",
     "@capacitor/preferences": "^6.0.4",
+    "capacitor-google-game-services": "^2.0.0",
+    "capacitor-play-games-services": "^2.0.1",
     "cordova-plugin-purchase": "^13.17.2"
   },
   "devDependencies": {

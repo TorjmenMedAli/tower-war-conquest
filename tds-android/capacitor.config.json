@@ -1,6 +1,6 @@
 {
   "appId": "com.TDS.zombietowerdefense",
-  "appName": "Tower Destiny Survive",
+  "appName": "Zombie Tower Defense",
   "webDir": "www",
   "android": {
     "allowMixedContent": true

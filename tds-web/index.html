@@ -3,11 +3,11 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-<title>Tower Destiny Survive</title>
+<title>Zombie Tower Defense</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Fredoka:wght@500;600;700&family=Luckiest+Guy&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=75" />
+<link rel="stylesheet" href="style.css?v=81" />
 </head>
 <body>
 <div class="app" id="app">
@@ -31,8 +31,8 @@
     </div>
 
     <div class="logo">
-      <span class="logo-top">TOWER&nbsp;DESTINY</span>
-      <span class="logo-bot">SURVIVE</span>
+      <span class="logo-top">ZOMBIE&nbsp;TOWER</span>
+      <span class="logo-bot">DEFENSE</span>
     </div>
 
     <button class="stage" id="toLevels">
@@ -51,6 +51,7 @@
         <span class="cu-txt"><b>CASTLE</b><i id="castleStage">Stage 1 / 7</i></span>
         <span class="cu-cost" id="castleCostBox"><span class="ico ic-coin"></span><b id="castleCostV">60</b></span>
       </button>
+      <button class="castle-upg-ad" id="castleUpgAd" style="display:none">▶ FREE</button>
     </div>
 
     <!-- loadout: equipped weapon + hero shown directly (tap to swap · ⬆ opens the garage) -->
@@ -192,16 +193,19 @@
         <div class="stat" data-stat="hp">
           <span class="sico">❤️</span>
           <div class="sinfo"><span class="sname">HP <i class="slv" id="l_hp">Lv 1</i></span><span class="sval" id="s_hp">220</span></div>
+          <button class="upg adfree" data-adact="hp" style="display:none">▶ FREE</button>
           <button class="upg" data-act="hp"><span class="ico ic-coin"></span><b id="c_hp">40</b></button>
         </div>
         <div class="stat" data-stat="dmg">
           <span class="sico">🔫</span>
           <div class="sinfo"><span class="sname">DAMAGE <i class="slv" id="l_dmg">Lv 1</i></span><span class="sval" id="s_dmg">100%</span></div>
+          <button class="upg adfree" data-adact="dmg" style="display:none">▶ FREE</button>
           <button class="upg" data-act="dmg"><span class="ico ic-coin"></span><b id="c_dmg">45</b></button>
         </div>
         <div class="stat" data-stat="pow">
           <span class="sico blt"></span>
           <div class="sinfo"><span class="sname">POWER <i class="slv" id="l_pow">Lv 1</i></span><span class="sval" id="s_pow">1.0/s</span></div>
+          <button class="upg adfree" data-adact="pow" style="display:none">▶ FREE</button>
           <button class="upg" data-act="pow"><span class="ico ic-coin"></span><b id="c_pow">50</b></button>
         </div>
       </div>
@@ -212,7 +216,8 @@
           <div class="stat" data-stat="wagon">
             <span class="sico">🛡️</span>
             <div class="sinfo"><span class="sname">ARMOR <i class="slv" id="l_wagon">Lv 1</i></span><span class="sval" id="s_wagon">+0 HP</span></div>
-            <button class="upg" data-act="wagon"><span class="ico ic-coin"></span><b id="c_wagon">70</b></button>
+            <button class="upg adfree" data-adact="wagon" style="display:none">▶ FREE</button>
+          <button class="upg" data-act="wagon"><span class="ico ic-coin"></span><b id="c_wagon">70</b></button>
           </div>
         </div>
       </div>
@@ -284,6 +289,22 @@
   </div>
 
   <!-- RATE US · 5★ → +1000 coins -->
+  <!-- RATE US star picker (popup 1): 4-5★ → store page · 1-3★ → thank-you (remote-config gated) -->
+  <div class="modal result" id="rateStarsModal">
+    <div class="rcard reward">
+      <div class="rhead">RATE US!</div>
+      <div class="rbody">
+        <div class="rtitle small" id="rsTitle">ENJOYING THE GAME?</div>
+        <div class="rsub" id="rsSub">How many stars would you give us?</div>
+        <div class="rate-stars" id="rsStars">
+          <button data-star="1">★</button><button data-star="2">★</button><button data-star="3">★</button><button data-star="4">★</button><button data-star="5">★</button>
+        </div>
+        <button class="rbtn green" id="rsOk" style="display:none">CONTINUE</button>
+        <button class="rlink" id="rsClose">Maybe later</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal result" id="rateModal">
     <div class="rcard reward">
       <div class="rhead">RATE US!</div>
@@ -383,7 +404,7 @@
     <div class="netgate-card">
       <div class="netgate-icon">📡</div>
       <div class="netgate-title">NO CONNECTION</div>
-      <div class="netgate-sub">Tower Destiny Survive needs an internet connection to play. Please check your network and try again.</div>
+      <div class="netgate-sub">Zombie Tower Defense needs an internet connection to play. Please check your network and try again.</div>
       <button class="big-btn netgate-btn" id="netRetry">RETRY</button>
     </div>
   </div>
@@ -396,6 +417,7 @@
 <script src="undead-art.js?v=28"></script>
 <script src="monster-art.js?v=26"></script>
 <script src="heroes-art.js?v=27"></script>
+<script src="ranks-art.js?v=1"></script>
 <script src="sfx.js?v=3"></script>
 <!-- Firebase Analytics + Remote Config + Auth + Firestore (compat SDK from Google's CDN; loads in the browser AND the Android WebView) -->
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -403,11 +425,11 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-remote-config-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-<script src="firebase.js?v=4"></script>
+<script src="firebase.js?v=5"></script>
 <script src="cloud.js?v=3"></script>
 <script src="leaderboard.js?v=1"></script>
-<script src="native.js?v=6"></script>
+<script src="native.js?v=7"></script>
 <script src="iap.js?v=1"></script>
-<script src="game.js?v=132"></script>
+<script src="game.js?v=140"></script>
 </body>
 </html>

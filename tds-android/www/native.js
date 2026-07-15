@@ -74,7 +74,8 @@
      Firestore save are unaffected. ANDROID-ONLY (PGS has no web SDK). */
   const SAVE_KEY_G = 'tds_save_web', SNAP = 'tds_main';
   function saveVer(blob) { try { var o = JSON.parse(blob); return o ? (o.sv | 0) : 0; } catch (e) { return 0; } }
-  const PG = cap.Plugins && (cap.Plugins.PlayGamesServices || cap.Plugins.PlayGames);
+  const PG  = cap.Plugins && (cap.Plugins.PlayGamesServices || cap.Plugins.PlayGames);
+  const GGS = cap.Plugins && cap.Plugins.GoogleGameServices;   // capacitor-google-game-services — Saved Games (Snapshots)
   if (PG) {
     // ⇩⇩ PASTE the ids you create in the Play Console (they look like "CgkI...") ⇩⇩
     const GAMES_IDS = {
@@ -101,7 +102,8 @@
       },
       unlock(key) {
         const id = GAMES_IDS.ach[key];
-        if (signedIn && configured(id) && PG.unlockAchievement) safe(PG.unlockAchievement({ id }));
+        const un = PG.unlockAchievement || PG.unLockAchievement;   // capacitor-play-games-services spells it unLockAchievement
+        if (signedIn && configured(id) && un) safe(un({ id }));
       },
       showLeaderboards() { if (signedIn) safe(PG.showAllLeaderboard ? PG.showAllLeaderboard() : (PG.showLeaderboard && PG.showLeaderboard({ id: GAMES_IDS.boards.highscore }))); },
       showAchievements() { if (signedIn && PG.showAchievements) safe(PG.showAchievements()); },
@@ -110,8 +112,11 @@
         return safe(PG.login()).then(() => {
           signedIn = true;
           document.dispatchEvent(new Event('tds-games-ready'));
-          reconcileSnapshot();                                 // pull the cross-device Google-account save
-          startSnapMirror();                                   // keep the snapshot mirrored to local
+          const g = (GGS && GGS.signIn) ? safe(GGS.signIn()) : Promise.resolve();  // snapshot plugin has its own auth handle
+          g.then(() => {
+            reconcileSnapshot();                               // pull the cross-device Google-account save
+            startSnapMirror();                                 // keep the snapshot mirrored to local
+          });
         });
       },
       saveSnapshot: v => snapSave(v),                          // exposed for manual/forced sync if ever needed
@@ -127,6 +132,7 @@
     }
     function snapLoad() {
       try {
+        if (GGS && GGS.loadGame) return Promise.resolve(GGS.loadGame()).then(snapExtract).catch(() => null);
         if (PG.loadGame)     return Promise.resolve(PG.loadGame({ name: SNAP })).then(snapExtract).catch(() => null);
         if (PG.loadSnapshot) return Promise.resolve(PG.loadSnapshot({ name: SNAP })).then(snapExtract).catch(() => null);
       } catch (e) {}
@@ -135,6 +141,7 @@
     function snapSave(data) {
       if (!data) return Promise.resolve();
       try {
+        if (GGS && GGS.saveGame) return safe(GGS.saveGame({ title: SNAP, data: data }));
         if (PG.saveGame)     return safe(PG.saveGame({ name: SNAP, data: data }));
         if (PG.saveSnapshot) return safe(PG.saveSnapshot({ name: SNAP, data: data }));
       } catch (e) {}

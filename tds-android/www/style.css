@@ -54,10 +54,9 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
 .screen { position: absolute; inset: 0; z-index: 2; display: none; flex-direction: column;
   /* keep all UI inside the device's safe area (status bar, notch/camera cutout, nav bar, rounded corners) */
   padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
-/* the battle HUD's bottom box (.hud-bottom) sits FLUSH on the screen's bottom edge and pads its
-   own safe-area inset — zero the screen's bottom padding here, or the inset is applied TWICE on
-   gesture-nav phones (box looks hugely inflated there, while normal on 3-button phones) */
-#game.screen { padding-bottom: 0; }
+/* the battle HUD keeps a small cushion above the system navigation buttons (same as the menu);
+   the safe-area inset is applied ONCE, here — the box itself uses plain fixed padding */
+#game.screen { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
 .screen.active { display: flex; animation: screenIn .34s cubic-bezier(.22,.9,.3,1) both; }
 @keyframes screenIn { from { opacity: 0; transform: translateY(10px) scale(.992); } to { opacity: 1; transform: none; } }
 
@@ -197,6 +196,7 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
   background: linear-gradient(180deg, #bfe6ef 0%, #e4dcc2 60%, #e9cf9e 100%);
 }
 .hero-card .hc-art svg { width: auto; height: 132px; max-width: 100%; }
+.hero-card .hc-art canvas { width: auto; height: 132px; max-width: 100%; }
 .hero-card .hc-art::after {            /* sandy ground strip, echoing the design card */
   content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 30px;
   background: #dcb87f; box-shadow: inset 0 5px 10px rgba(0,0,0,.12);
@@ -238,7 +238,11 @@ canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block
   display: grid; place-items: center; font-size: 28px;
   background: linear-gradient(#2a3a58, #1a2740); border: 2px solid #4f6f9c; box-shadow: inset 0 2px 4px rgba(0,0,0,.4);
 }
+.lc-art { position: relative; }
 .lc-art img, .lc-art svg { width: 100%; height: 100%; object-fit: contain; }
+/* canvas portraits: absolute so % resolves against the 56px box (a grid track would let the
+   canvas's intrinsic 256px size blow the layout open) */
+.lc-art canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
 .lc-art .lc-tok {
   width: 100%; height: 100%; display: grid; place-items: center; font-size: 26px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--rc) 55%, #20222b), #181922);
@@ -443,9 +447,9 @@ button:disabled:active { transform: none; }
 .coinchip.bump { animation: bump .28s ease; }
 
 .hud-bottom { margin-top: auto; display: grid; gap: 8px;
-  background: linear-gradient(var(--panel-top), var(--panel-bot)); border: 3px solid var(--panel-edge); border-bottom: none;
-  border-radius: 26px 26px 0 0; padding: 10px; padding-bottom: clamp(10px, env(safe-area-inset-bottom), 30px);   /* single, CAPPED inset — some WebViews over-report it */
-  box-shadow: 0 -6px 16px rgba(0,0,0,.35), inset 0 2px 0 rgba(255,255,255,.2); }
+  background: linear-gradient(var(--panel-top), var(--panel-bot)); border: 3px solid var(--panel-edge);
+  border-radius: 26px; padding: 10px;   /* floating rounded panel — the screen's bottom padding keeps it clear of the nav buttons */
+  box-shadow: 0 6px 16px rgba(0,0,0,.35), inset 0 2px 0 rgba(255,255,255,.2); }
 .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; }
 .abilities { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; align-items: stretch; }
 .builds { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
@@ -1085,12 +1089,28 @@ button:disabled:active { transform: none; }
 .name-input:focus { border-color: #4db4ff; }
 
 /* ── Special-force cards: locked state + "first upgrade via ad" button ── */
-.sf-card.locked { filter: saturate(.5); opacity: .85; }
+/* dim only the CONTENT of a locked card — never the buy button, which must stay vivid
+   (gold + enabled) whenever the player can afford it */
 .sf-card.locked .sfc-ico { filter: grayscale(.6) brightness(.85); }
+.sf-card.locked .sfc-name, .sf-card.locked .sfc-stat, .sf-card.locked .sfc-cost { opacity: .6; }
 .sfc-lv.locked { color: #9aa7b6; font-weight: 800; }
 .wc-btn.adup { background: linear-gradient(180deg, #4db4ff, #2f7fe0); color: #fff; box-shadow: 0 3px 0 #1f5cae;
   font-weight: 800; letter-spacing: .3px; }
 .wc-btn.adup:active { transform: translateY(2px); box-shadow: 0 1px 0 #1f5cae; }
+/* "first upgrade by rewarded ad" chips on the tower stat rows + the menu castle button */
+.upg.adfree { background: linear-gradient(180deg, #4db4ff, #2f7fe0); color: #fff; box-shadow: 0 3px 0 #1f5cae;
+  font-weight: 800; font-size: 12px; letter-spacing: .3px; white-space: nowrap; }
+.castle-upg-ad { pointer-events: auto; cursor: pointer; font-family: inherit; font-weight: 800; font-size: 12px;
+  margin-left: 8px; padding: 8px 10px; border: none; border-radius: 14px; color: #fff; letter-spacing: .3px;
+  background: linear-gradient(180deg, #4db4ff, #2f7fe0); box-shadow: 0 4px 0 #1f5cae, 0 5px 10px rgba(0,0,0,.35); }
+.castle-upg-ad:active { transform: translateY(2px); box-shadow: 0 2px 0 #1f5cae; }
+
+/* ── rate-us star picker (popup 1) ── */
+.rate-stars { display: flex; justify-content: center; gap: 6px; margin: 6px 0 12px; }
+.rate-stars button { border: none; background: none; cursor: pointer; font-size: 40px; line-height: 1;
+  color: #3a4660; text-shadow: 0 2px 3px rgba(0,0,0,.35); transition: transform .08s ease, color .12s ease; padding: 2px; }
+.rate-stars button.lit { color: #ffd24a; transform: scale(1.12); }
+.rate-stars button:active { transform: scale(0.92); }
 
 /* ── Story intro card ── */
 .storycard { text-align: center; max-width: 340px; }
