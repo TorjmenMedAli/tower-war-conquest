@@ -14,7 +14,7 @@ Usage:  python gen-icon.py        (needs Pillow: pip install Pillow)
 Swap assets/icon.png (>=1024x1024) and re-run to re-brand.
 """
 import os
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(HERE, "assets", "icon.png")
@@ -48,7 +48,7 @@ def circle_mask(size):
 
 legacy = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 fg = {"mdpi": 108, "hdpi": 162, "xhdpi": 216, "xxhdpi": 324, "xxxhdpi": 432}
-SAFE = 0.74  # adaptive safe zone: keep the art inside the central ~66% the mask reveals
+SAFE = 0.72  # adaptive safe zone: keep the art inside the central ~66% the mask reveals
 
 for dens, sz in legacy.items():
     d = os.path.join(RES, "mipmap-" + dens)
@@ -58,12 +58,20 @@ for dens, sz in legacy.items():
     rnd.putalpha(circle_mask(sz))
     rnd.save(os.path.join(d, "ic_launcher_round.png"))
     fsz = fg[dens]
+    # adaptive FOREGROUND: sharp SQUARE art in the safe zone (transparent border). No circle
+    # mask — squircle/rounded-square launchers (MIUI etc.) reveal far more than a circle, and
+    # a circular emblem shows its own edge + flat corners there.
     art = int(fsz * SAFE)
-    disc = master.resize((art, art), Image.LANCZOS)
-    disc.putalpha(circle_mask(art))
     canvas = Image.new("RGBA", (fsz, fsz), (0, 0, 0, 0))
-    canvas.paste(disc, ((fsz - art) // 2, (fsz - art) // 2), disc)
+    canvas.paste(master.resize((art, art), Image.LANCZOS), ((fsz - art) // 2, (fsz - art) // 2))
     canvas.save(os.path.join(d, "ic_launcher_foreground.png"))
+    # adaptive BACKGROUND: blurred, zoomed art — whatever region a launcher's mask exposes
+    # beyond the sharp foreground is matching artwork, never a flat ring or hard seam.
+    crop = int(MASTER * 0.70)
+    o = (MASTER - crop) // 2
+    bgim = master.crop((o, o, o + crop, o + crop)).resize((fsz, fsz), Image.LANCZOS)
+    bgim = bgim.filter(ImageFilter.GaussianBlur(max(2, int(fsz * 0.055))))
+    bgim.convert("RGB").save(os.path.join(d, "ic_launcher_bgimg.png"))
     print("wrote", dens)
 
 with open(os.path.join(RES, "values", "ic_launcher_background.xml"), "w", encoding="utf-8") as f:
