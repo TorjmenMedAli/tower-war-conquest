@@ -4,7 +4,9 @@
 Produces, for every density (mdpi..xxxhdpi):
   - ic_launcher.png            legacy square, full bleed
   - ic_launcher_round.png      circular-masked (transparent corners)
-  - ic_launcher_foreground.png adaptive foreground, full bleed
+  - ic_launcher_foreground.png adaptive foreground — art shrunk to the SAFE
+    fraction of the canvas as a circular emblem, because launchers mask the
+    outer ~1/3 of adaptive icons (full-bleed art gets visibly cut)
 and sets @color/ic_launcher_background to a colour sampled from the art so
 that masked adaptive corners blend in.
 
@@ -46,6 +48,7 @@ def circle_mask(size):
 
 legacy = {"mdpi": 48, "hdpi": 72, "xhdpi": 96, "xxhdpi": 144, "xxxhdpi": 192}
 fg = {"mdpi": 108, "hdpi": 162, "xhdpi": 216, "xxhdpi": 324, "xxxhdpi": 432}
+SAFE = 0.70  # adaptive safe zone: keep the art inside the central ~66% the mask reveals
 
 for dens, sz in legacy.items():
     d = os.path.join(RES, "mipmap-" + dens)
@@ -54,8 +57,13 @@ for dens, sz in legacy.items():
     rnd = sq.copy()
     rnd.putalpha(circle_mask(sz))
     rnd.save(os.path.join(d, "ic_launcher_round.png"))
-    master.resize((fg[dens], fg[dens]), Image.LANCZOS).save(
-        os.path.join(d, "ic_launcher_foreground.png"))
+    fsz = fg[dens]
+    art = int(fsz * SAFE)
+    disc = master.resize((art, art), Image.LANCZOS)
+    disc.putalpha(circle_mask(art))
+    canvas = Image.new("RGBA", (fsz, fsz), (0, 0, 0, 0))
+    canvas.paste(disc, ((fsz - art) // 2, (fsz - art) // 2), disc)
+    canvas.save(os.path.join(d, "ic_launcher_foreground.png"))
     print("wrote", dens)
 
 with open(os.path.join(RES, "values", "ic_launcher_background.xml"), "w", encoding="utf-8") as f:
