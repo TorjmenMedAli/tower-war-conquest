@@ -1022,7 +1022,7 @@ function kill(e, reward){
     for (let k = 0; k < 30; k++) burst(e.x, e.y - 30 * S(), k % 2 ? '#caa46a' : '#8a929c');
     flash(); return;
   }
-  if (reward){ SFX.play('die'); addScore(REWARD); gainUltOnKill(); state.kills = (state.kills || 0) + 1; for (let k = 0; k < 8; k++) burst(e.x, e.y - 24 * S(), '#7bbf4a'); }
+  if (reward){ SFX.play('die'); buzz(e.boss ? 'heavy' : 'light'); addScore(REWARD); gainUltOnKill(); state.kills = (state.kills || 0) + 1; for (let k = 0; k < 8; k++) burst(e.x, e.y - 24 * S(), '#7bbf4a'); }
 }
 function popup(x, y, txt, color){ state.pops.push({ x, y, vy: -52 * S(), life: 0.7, txt, color }); }
 function burst(x, y, color){ const s = S(); state.parts.push({ x, y, vx: (Math.random()-0.5)*220*s, vy: -Math.random()*220*s, life: 0.5, color, size: (2+Math.random()*3)*s }); }
@@ -1052,7 +1052,7 @@ function fireUltimate(){
   const hero = HEROES[Meta.hero - 1] || HEROES[0];
   const bs = heroBullet(hero), col = bs.glow || bs.trail || '#ffd24a';
   const dmg = heroDmg(hero) * 6 + 120;                    // hero-scaled screen-clear
-  flash(); SFX.play('strike');
+  flash(); SFX.play('strike'); buzz('heavy');
   for (const e of state.enemies){ if (e.dead) continue; hurt(e, e.boss ? dmg * 0.8 : dmg, col); }   // hits the boss too, at 80%
   state.frost = Math.max(state.frost, 2.4);               // freeze whoever survives
   if (state.castle){ const c = state.castle; c.hp = Math.min(c.maxHp, c.hp + c.maxHp * 0.25); refreshHp(); }   // heal the core
@@ -1088,6 +1088,18 @@ function lerpHex(a, b, t){
 }
 
 let pendingRewards = [];
+
+/* ---------------- Haptics (Android, @capacitor/haptics) — silent no-op on web ---------------- */
+const Haptic = (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform() && Capacitor.Plugins) ? Capacitor.Plugins.Haptics : null;
+let lastBuzz = 0;
+function buzz(kind){                                       // 'light' | 'medium' | 'heavy' | 'success'
+  if (!Haptic || Meta.sound === false) return;             // respect the mute toggle
+  const now = performance.now(); if (now - lastBuzz < 90) return; lastBuzz = now;   // throttle bursts (e.g. splash kills)
+  try {
+    if (kind === 'success') Haptic.notification({ type: 'SUCCESS' }).catch(() => {});
+    else Haptic.impact({ style: kind === 'heavy' ? 'HEAVY' : (kind === 'medium' ? 'MEDIUM' : 'LIGHT') }).catch(() => {});
+  } catch (e) {}
+}
 function closeResultModals(){ ['victoryModal','defeatModal','rewardModal'].forEach(id => { const m = $(id); if (m) m.classList.remove('active'); }); }
 function resetDoubleBtn(btn){ if (!btn) return; btn.disabled = false; btn.classList.remove('done'); btn.innerHTML = AD_BTN_HTML; }
 function paintStars(n){
@@ -1217,7 +1229,7 @@ function showRewardModal(r, onClaim){
   const g = $('rwGoodies'); g.innerHTML = '';
   if (r.coins) g.insertAdjacentHTML('beforeend', `<span class="rpill coin">${ICON_COIN}+${r.coins}</span>`);
   if (r.gems)  g.insertAdjacentHTML('beforeend', `<span class="rpill gem">${ICON_GEM}+${r.gems}</span>`);
-  const grant = (mult) => { if (!r.hero) SFX.play('coin'); Meta.coins += (r.coins || 0) * mult; Meta.gems += (r.gems || 0) * mult; Meta.save(); onClaim(); };
+  const grant = (mult) => { if (!r.hero) SFX.play('coin'); buzz('light'); Meta.coins += (r.coins || 0) * mult; Meta.gems += (r.gems || 0) * mult; Meta.save(); onClaim(); };
   const claim = $('rwClaim'); claim.onclick = () => grant(1);
   const dbl = $('rwDouble');   // every reward can be doubled by watching an ad
   if (dbl){
@@ -1305,6 +1317,7 @@ function proceed(action){
 function gameOver(){
   if (state.over) return;
   state.over = true; state.heroDeadAt = state.t;
+  buzz('heavy');
   refreshUltBtn();                              // hide the ultimate button on defeat
   if (state.endless){ Meta.endlessBest = Math.max(Meta.endlessBest | 0, state.score | 0); Meta.save(); }   // record survival best
   // consolation coins are only CREDITED when the player leaves (retry/menu)
@@ -1353,6 +1366,7 @@ function skipLevel(){
 function levelComplete(){
   if (state.over) return;
   state.over = true; state.won = true;
+  buzz('success');
   refreshUltBtn();                                 // hide the ultimate button on victory
   const firstClear = !Meta.stars[state.level];    // no star recorded yet → this is the first-ever clear
   // victory purse ramps with level so later levels fund their pricier upgrades: L1 1000 … L5 4200 … L10 10450 — doublable via COLLECT ×2 ad
@@ -2660,7 +2674,7 @@ function grantIap(pr){
   if (pr.special === 'noads'){ Meta.noAds = true; Meta.gems += 300; }
   else if (pr.special === 'starter'){ Meta.starterBought = true; Meta.gems += 500; Meta.coins += 5000; const sm = $('starterModal'); if (sm) sm.classList.remove('active'); }
   else { Meta.gems += (pr.gems || 0); Meta.coins += (pr.coins || 0); }
-  SFX.play('coin'); Meta.save(); refreshShop(); refreshMenu();
+  buzz('success'); SFX.play('coin'); Meta.save(); refreshShop(); refreshMenu();
 }
 function buyIap(key){ if (window.TDSIAP) TDSIAP.buy(key).catch(() => {}); }   // grant happens via grantIap on success
 // live localized price (e.g. "$1.99" / "€1,99") once the store loads, else the hard-coded fallback
@@ -3255,6 +3269,31 @@ if (LNotif){
   window.addEventListener('pagehide', scheduleNotifs);
   clearNotifs();                                             // launch → drop anything still pending
 }
+
+/* ---------------- Offline earnings: the tower keeps earning while you're away ----------------
+   Heartbeat lives in its OWN localStorage key (not the save blob) so it never inflates the
+   save counter / spams cloud pushes. Granted on launch via the standard reward modal, so the
+   watch-ad-to-double button comes for free. Requires being online anyway (netGate). */
+const AWAY_KEY = 'tds_last_seen', AWAY_MIN_MS = 10 * 60 * 1000, AWAY_CAP_H = 8;
+function awayHeartbeat(){ try { localStorage.setItem(AWAY_KEY, String(Date.now())); } catch(e){} }
+function offlineEarnings(){
+  let last = 0; try { last = parseInt(localStorage.getItem(AWAY_KEY), 10) || 0; } catch(e){}
+  awayHeartbeat();
+  if (!last) return;                                       // first ever launch → nothing accrued
+  const away = Date.now() - last;
+  if (away < AWAY_MIN_MS) return;                          // short hop → no popup spam
+  const hours = Math.min(away / 3600000, AWAY_CAP_H);      // earnings cap out after 8h away
+  // rate scales with campaign progress + the POWER upgrade so it stays relevant late-game
+  const coins = Math.round(hours * 80 * levelCoinMul(Meta.level) * Meta.powIncome());
+  if (coins < 10) return;
+  const hTxt = hours >= 1 ? `${Math.floor(hours)}H ${Math.round((hours % 1) * 60)}M` : `${Math.round(hours * 60)} MIN`;
+  showRewardModal({ icon: '🌙', accent: '#4a90e2', title: 'WHILE YOU WERE AWAY', tag: hTxt + ' OFFLINE',
+    desc: 'Your tower kept the zombies busy!', coins: coins },
+    () => { $('rewardModal').classList.remove('active'); refreshMenu(); });
+}
+setInterval(awayHeartbeat, 30000);
+window.addEventListener('pagehide', awayHeartbeat);
+setTimeout(() => { if (state.screen === 'menu' && !document.querySelector('.modal.active')) offlineEarnings(); else awayHeartbeat(); }, 2500);
 $('tkAd').addEventListener('click', adTicket);
 $('tkClose').addEventListener('click', closeTicketModal);
 setInterval(() => { if (state.screen === 'menu'){ regenTickets(); refreshTikUi(); maybeOfferStarter(); } }, 1000);   // live 🎫 countdown + one-time starter offer
