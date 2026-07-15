@@ -1092,6 +1092,13 @@ button:disabled:active { transform: none; }
 .month-sub { font-size: 14px; color: #cfd9e6; font-weight: 700; margin: 4px 0 2px; }
 .month-gems { font-size: 27px; font-weight: 900; color: #7ef0a0; margin: 10px 0 16px; text-shadow: 0 2px 10px rgba(90, 240, 150, .35); }
 
+/* ── Starter pack offer ── */
+.starter-items { display: flex; justify-content: center; gap: 14px; margin: 12px 0 6px; font-size: 15px; font-weight: 800; color: #eef3fb; }
+.starter-items b { color: #ffe07a; }
+.starter-strike { font-size: 14px; color: #9aa7b6; margin-bottom: 14px; }
+.starter-strike b { color: #ff7a45; margin-left: 6px; }
+.starter-later { display: block; margin: 10px auto 0; background: none; border: 0; color: #8f9cb0; font-size: 13px; font-weight: 700; cursor: pointer; text-decoration: underline; }
+
 /* ── Nickname prompt ── */
 .namepanel { width: min(88%, 340px); text-align: center; }
 .name-title { font-size: 20px; font-weight: 900; color: #ffd24a; margin-bottom: 6px; }

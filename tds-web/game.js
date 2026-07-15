@@ -330,6 +330,10 @@ const Meta = {
   name: '',                                              // leaderboard nickname (chosen once)
   monthScore: null,                                      // monthly contest { m:'YYYY-MM', total } — sum of run scores this month
   monthClaimed: '',                                      // last month whose contest prizes were already settled for this player
+  weekScore: null,                                       // weekly contest { w:'YYYY-Www', total } — same idea, weekly
+  weekClaimed: '',                                       // last week whose contest prizes were already settled
+  killsTotal: 0,                                         // lifetime zombies destroyed (achievements)
+  starterBought: false, starterSeen: false,              // one-time STARTER PACK IAP · offer popup shown once
   sv: 0,                                                 // monotonic save version — cloud conflict resolution (last-write-wins)
   dailyDay: 0, adDay: 0, adChestUsed: 0, adCoinUsed: 0, adGemUsed: 0,    // daily free chest + per-day ad-box limits
   streak: 0, streakDay: 0,                                 // daily login streak (day N pays 100·N coins)
@@ -354,7 +358,8 @@ const Meta = {
     streak:Meta.streak, streakDay:Meta.streakDay, heroesOwned:Meta.heroesOwned,
     sound:Meta.sound, stars:Meta.stars, ftue:Meta.ftue, starClaimed:Meta.starClaimed, pticket:Meta.pticket, pticketAt:Meta.pticketAt, rated:Meta.rated, ratePicked:Meta.ratePicked,
     endlessBest:Meta.endlessBest, bestScore:Meta.bestScore, name:Meta.name, wagonCapMig:Meta.wagonCapMig,
-    monthScore:Meta.monthScore, monthClaimed:Meta.monthClaimed, sv:Meta.sv })); } catch(e){} },
+    monthScore:Meta.monthScore, monthClaimed:Meta.monthClaimed, weekScore:Meta.weekScore, weekClaimed:Meta.weekClaimed,
+    killsTotal:Meta.killsTotal, starterBought:Meta.starterBought, starterSeen:Meta.starterSeen, sv:Meta.sv })); } catch(e){} },
   // castle stats — upgrading HP / the castle stage make the castle tankier
   heroMaxHp(){ return 430 + (Meta.hp - 1) * 70; },                          // hero core — the LAST line of defence (bigger base so a fresh run lasts ~1 min+)
   wagonMaxHp(){ return 200 + Meta.castle * 90 + Meta.wagon * WAGON_HP; },    // wagon shield — soaks damage first
@@ -1162,13 +1167,18 @@ function tallyGameAndStreak(){
     const sc = state ? (state.score | 0) : 0;
     if (sc > (Meta.bestScore | 0)) Meta.bestScore = sc;
     if (Meta.name && window.TDSLeaderboard && TDSLeaderboard.ready) TDSLeaderboard.submit(Meta.name, Meta.bestScore);
-    // monthly contest: every run's score adds to this month's total (top 10 win gems — checkMonthReward)
+    // weekly + monthly contests: every run's score adds to the running totals (top 10 win gems)
     if (sc > 0 && window.TDSLeaderboard && TDSLeaderboard.monthKey){
       const mk = TDSLeaderboard.monthKey();
       if (!Meta.monthScore || Meta.monthScore.m !== mk) Meta.monthScore = { m: mk, total: 0 };
       Meta.monthScore.total += sc;
       if (Meta.name && TDSLeaderboard.ready) TDSLeaderboard.submitMonthly(Meta.name, Meta.monthScore.total, mk);
+      const wk = TDSLeaderboard.weekKey();
+      if (!Meta.weekScore || Meta.weekScore.w !== wk) Meta.weekScore = { w: wk, total: 0 };
+      Meta.weekScore.total += sc;
+      if (Meta.name && TDSLeaderboard.ready) TDSLeaderboard.submitWeekly(Meta.name, Meta.weekScore.total, wk);
     }
+    Meta.killsTotal = (Meta.killsTotal | 0) + (state ? (state.kills | 0) : 0);   // lifetime kills (achievements)
   }
   // Play Games Services: submit the run to the leaderboards + unlock milestone achievements
   // (Android only; a harmless no-op on web / before sign-in — see TDSGames in native.js).
@@ -1179,6 +1189,7 @@ function tallyGameAndStreak(){
     if (Meta.unlocked >= 5)  window.TDSGames.unlock('level_5');
     if (Meta.unlocked >= 10) window.TDSGames.unlock('level_10');
     if ((Meta.games | 0) >= 25) window.TDSGames.unlock('veteran');
+    checkAchievements();                                 // second-wave milestones (kills, collection, streak…)
   }
   if (Meta.games % rateEvery() === 0) queueRating();   // rating popups every N games (remote-config cadence, default 5)
   if (Meta.games % 4 === 0){
@@ -2473,7 +2484,9 @@ function claimStreak(){
   if (!streakClaimable()) return;
   Meta.streak = (Meta.streakDay === dayNum() - 1) ? (Meta.streak || 0) + 1 : 1;
   Meta.streakDay = dayNum();
-  const base = streakReward(Meta.streak); Meta.coins += base; streakBonus = base; Meta.save();
+  const base = streakReward(Meta.streak); Meta.coins += base; streakBonus = base;
+  if (Meta.streak % 7 === 0) Meta.gems += 20;              // day-7 calendar bonus: +20 💎 on top of the coins
+  Meta.save();
   openStreak(); refreshMenu();
 }
 function streakDoubleAd(){ if (streakBonus <= 0) return; const b = streakBonus; playRewardedAd(() => { Meta.coins += b; streakBonus = 0; Meta.save(); openStreak(); refreshMenu(); }); }
@@ -2488,7 +2501,7 @@ function openStreak(){
       t.className = 'st-tile' + (done ? ' done' : '') + (next ? ' next' : '') + (bonus ? ' bonus' : '');
       t.innerHTML = `<span class="st-day">${bonus ? 'Day 7 · BONUS' : 'Day ' + i}</span>`
         + `<span class="st-coin">${ICON_COIN}</span>`
-        + `<span class="st-amt">${streakReward(day)}</span>`
+        + `<span class="st-amt">${streakReward(day)}${bonus ? ' +20💎' : ''}</span>`
         + (done ? '<span class="st-chk">✓</span>' : '');
       row.appendChild(t);
     }
@@ -2635,6 +2648,7 @@ const IAP = [
   { key: 'gems3', id: '1600gems',  type: 'consumable',     gems: 1600 },  // $9.99
   { key: 'mega',  id: 'megachest', type: 'consumable',     special: 'mega' },   // $2.99
   { key: 'noads', id: 'roads',     type: 'non-consumable', special: 'noads' },  // $4.99  ⚠️ verify this ID (looks like a typo for "noads")
+  { key: 'starter', id: 'starterpack', type: 'non-consumable', special: 'starter' },  // $2.99 one-time: 500 💎 + 5000 coins
 ];
 function grantIap(pr){
   if (!pr) return;
@@ -2644,6 +2658,7 @@ function grantIap(pr){
     return;
   }
   if (pr.special === 'noads'){ Meta.noAds = true; Meta.gems += 300; }
+  else if (pr.special === 'starter'){ Meta.starterBought = true; Meta.gems += 500; Meta.coins += 5000; const sm = $('starterModal'); if (sm) sm.classList.remove('active'); }
   else { Meta.gems += (pr.gems || 0); Meta.coins += (pr.coins || 0); }
   SFX.play('coin'); Meta.save(); refreshShop(); refreshMenu();
 }
@@ -2674,6 +2689,11 @@ function buildCoinsTab(body){
     afford: Meta.gems >= 10, onBuy: () => { if (Meta.gems < 10) return; Meta.gems -= 10; Meta.energy = (Meta.energy || 0) + 30; Meta.save(); refreshShop(); refreshMenu(); } }));
 }
 function buildGemsTab(body){
+  if (!Meta.starterBought){
+    body.appendChild(shopHead('One-time offer'));
+    body.appendChild(shopCard({ icon: '🎁', name: 'STARTER PACK', desc: '500 💎 + 5,000 coins · one time only', badge: '-80%', accent: '#ff7a45',
+      priceHtml: iapPrice('starter', '$2.99'), onBuy: () => buyIap('starter') }));
+  }
   body.appendChild(shopHead('Get gems'));
   const packs = [ { name: 'PILE OF GEMS', gems: 100, price: '$1.99', key: 'gems1' }, { name: 'SACK OF GEMS', gems: 700, price: '$4.99', badge: '+100 BONUS', key: 'gems2' }, { name: 'CHEST OF GEMS', gems: 1600, price: '$9.99', badge: 'BEST VALUE', key: 'gems3' } ];
   for (const p of packs) body.appendChild(shopCard({ icon: '💎', name: p.name, desc: `${p.gems} gems`, badge: p.badge, accent: '#b15ce8', priceHtml: iapPrice(p.key, p.price),
@@ -2779,26 +2799,27 @@ function ensureName(cb){
   modal.classList.add('active');
   try { inp.focus(); } catch (e) {}
 }
-/* ---------------- Monthly contest (top 10 of each month win gems) ---------------- */
-const MONTH_PRIZES = { top3: 1000, top10: 300 };           // ranks 1-3 → 1000 💎, ranks 4-10 → 300 💎
-function monthPrize(rank){ return rank >= 1 && rank <= 3 ? MONTH_PRIZES.top3 : (rank >= 4 && rank <= 10 ? MONTH_PRIZES.top10 : 0); }
-// Settle LAST month's contest once per player: read the final top 10, grant gems if we placed.
+/* ---------------- Weekly + monthly contests (top 10 win gems) ---------------- */
+// Prize amounts come from Remote Config (tune live, no app update); these are the shipped defaults.
+function rcNum(key, dflt){ try { if (window.TDSRemoteConfig && TDSRemoteConfig.on){ const v = TDSRemoteConfig.getNumber(key); if (v > 0) return v; } } catch(e){} return dflt; }
+function monthPrize(rank){ return rank >= 1 && rank <= 3 ? rcNum('month_prize_top3', 1000) : (rank >= 4 && rank <= 10 ? rcNum('month_prize_top10', 300) : 0); }
+function weekPrize(rank){ return rank >= 1 && rank <= 3 ? rcNum('week_prize_top3', 300) : (rank >= 4 && rank <= 10 ? rcNum('week_prize_top10', 100) : 0); }
+// Settle a FINISHED contest once per player: read its final top 10, grant gems if we placed.
 // Retries harmlessly until the board fetch succeeds and the cloud identity exists.
-function checkMonthReward(){
+function settleContest(prevKey, claimedField, topFn, prizeFn, label){
   const LB = window.TDSLeaderboard;
-  if (!LB || !LB.ready || !LB.prevMonthKey) return;
-  const pm = LB.prevMonthKey();
-  if (Meta.monthClaimed === pm) return;                    // that month is already settled
+  if (!LB || !LB.ready) return;
+  if (Meta[claimedField] === prevKey) return;              // already settled
   const me = LB.uid(); if (!me) return;                    // identity not up yet → retry later
-  LB.topMonthly(pm, 10).then(rows => {
+  topFn(prevKey, 10).then(rows => {
     if (!rows) return;                                     // fetch FAILED → keep unclaimed, retry later
-    Meta.monthClaimed = pm;                                // settled — even when unranked or empty board
+    Meta[claimedField] = prevKey;                          // settled — even when unranked or empty board
     let rank = 0; rows.forEach((r, i) => { if (r.uid === me) rank = i + 1; });
-    const gems = monthPrize(rank);
+    const gems = prizeFn(rank);
     if (gems){
       Meta.gems += gems; SFX.play('coin');
       const sub = $('monthSub'), g = $('monthGems'), m = $('monthModal');
-      if (sub) sub.textContent = `You finished #${rank} in last month's contest!`;
+      if (sub) sub.textContent = `You finished #${rank} in last ${label}'s contest!`;
       if (g) g.textContent = `+${gems} 💎`;
       if (m) m.classList.add('active');
       refreshMenu();
@@ -2806,7 +2827,12 @@ function checkMonthReward(){
     Meta.save();
   });
 }
-let lbTab = 'month';                                       // 'month' | 'all' — the contest is the default view
+function checkMonthReward(){
+  const LB = window.TDSLeaderboard; if (!LB || !LB.ready) return;
+  settleContest(LB.prevMonthKey(), 'monthClaimed', (k, n) => LB.topMonthly(k, n), monthPrize, 'month');
+  settleContest(LB.prevWeekKey(),  'weekClaimed',  (k, n) => LB.topWeekly(k, n),  weekPrize,  'week');
+}
+let lbTab = 'month';                                       // 'week' | 'month' | 'all' — the contests are the default views
 function daysLeftInMonth(){ const d = new Date(); return Math.max(1, Math.ceil((new Date(d.getFullYear(), d.getMonth() + 1, 1) - d) / 86400000)); }
 function openLeaderboard(){
   if (!window.TDSLeaderboard || !TDSLeaderboard.ready) return;
@@ -2816,28 +2842,40 @@ function openLeaderboard(){
   checkMonthReward();                                      // settle last month's prizes on open too
   renderLb();
 }
+function daysLeftInWeek(){ const dn = new Date().getDay() || 7; return Math.max(1, 8 - dn); }   // ISO week ends Sunday
 function renderLb(){
   const list = $('lbList'), you = $('lbYou'), foot = $('lbFoot'), prizes = $('lbPrizes');
-  const tm = $('lbTabMonth'), ta = $('lbTabAll');
+  const tw = $('lbTabWeek'), tm = $('lbTabMonth'), ta = $('lbTabAll');
   if (!list || !you) return;
+  if (tw) tw.classList.toggle('active', lbTab === 'week');
   if (tm) tm.classList.toggle('active', lbTab === 'month');
   if (ta) ta.classList.toggle('active', lbTab === 'all');
-  if (prizes) prizes.style.display = lbTab === 'month' ? '' : 'none';
+  if (prizes){
+    prizes.style.display = lbTab === 'all' ? 'none' : '';
+    const top3 = lbTab === 'week' ? weekPrize(1) : monthPrize(1), top10 = lbTab === 'week' ? weekPrize(4) : monthPrize(4);
+    prizes.innerHTML = `🥇🥈🥉 <b>${top3}</b> 💎 &nbsp;•&nbsp; #4–10 <b>${top10}</b> 💎`;
+  }
   list.innerHTML = '<div class="lb-empty">Loading…</div>'; you.textContent = ''; you.className = 'lb-you';
   const me = TDSLeaderboard.uid();
-  if (lbTab === 'month'){
+  if (lbTab === 'week'){
+    const wk = TDSLeaderboard.weekKey();
+    const mine = (Meta.weekScore && Meta.weekScore.w === wk) ? (Meta.weekScore.total | 0) : 0;
+    if (mine > 0) TDSLeaderboard.submitWeekly(Meta.name, mine, wk);        // ensure my total is posted
+    if (foot) foot.textContent = `Total score this week · ends in ${daysLeftInWeek()}d · prizes paid Monday`;
+    TDSLeaderboard.topWeekly(wk, 100).then(rows => fillLbRows(list, you, rows || [], me, 'total', mine, weekPrize));
+  } else if (lbTab === 'month'){
     const mk = TDSLeaderboard.monthKey();
     const mine = (Meta.monthScore && Meta.monthScore.m === mk) ? (Meta.monthScore.total | 0) : 0;
     if (mine > 0) TDSLeaderboard.submitMonthly(Meta.name, mine, mk);       // ensure my total is posted
     if (foot) foot.textContent = `Total score this month · ends in ${daysLeftInMonth()}d · prizes paid on the 1st`;
-    TDSLeaderboard.topMonthly(mk, 100).then(rows => fillLbRows(list, you, rows || [], me, 'total', mine));
+    TDSLeaderboard.topMonthly(mk, 100).then(rows => fillLbRows(list, you, rows || [], me, 'total', mine, monthPrize));
   } else {
     if (foot) foot.textContent = 'Best single-run score · updates after each battle';
     TDSLeaderboard.submit(Meta.name, Meta.bestScore);                      // ensure my latest best is posted
-    TDSLeaderboard.top(100).then(rows => fillLbRows(list, you, rows || [], me, 'score', Meta.bestScore | 0));
+    TDSLeaderboard.top(100).then(rows => fillLbRows(list, you, rows || [], me, 'score', Meta.bestScore | 0, null));
   }
 }
-function fillLbRows(list, you, rows, me, field, mineVal){
+function fillLbRows(list, you, rows, me, field, mineVal, prizeFn){
   list.innerHTML = '';
   if (!rows.length){ list.innerHTML = '<div class="lb-empty">No scores yet — be the first!</div>'; }
   let myRank = 0;
@@ -2850,10 +2888,24 @@ function fillLbRows(list, you, rows, me, field, mineVal){
       + `<span class="lb-score">${(r[field] || 0).toLocaleString()}</span>`;
     list.appendChild(row);
   });
-  const prize = field === 'total' ? monthPrize(myRank) : 0;                // show the reward your CURRENT rank would pay
+  const prize = prizeFn ? prizeFn(myRank) : 0;                             // the reward your CURRENT rank would pay
   you.className = 'lb-you' + (myRank ? '' : ' out');
   you.innerHTML = `<span>${myRank ? ('YOU · #' + myRank) : 'YOU · unranked'}${prize ? ` · wins ${prize} 💎` : ''}</span>`
     + `<span>${(mineVal || 0).toLocaleString()}</span>`;
+}
+/* ---------------- Second-wave PGS achievements (ids live in native.js GAMES_IDS) ---------------- */
+function checkAchievements(){
+  const G = window.TDSGames; if (!G || !G.ready) return;   // unlock() no-ops for ids still marked PASTE
+  if ((Meta.games | 0)      >= 100)   G.unlock('veteran100');
+  if ((Meta.killsTotal | 0) >= 1000)  G.unlock('kills_1k');
+  if ((Meta.killsTotal | 0) >= 10000) G.unlock('kills_10k');
+  if ((Meta.wlv || []).some(l => l >= WEAPON_MAX))       G.unlock('weapon_max');
+  if ((Meta.owned || []).length >= WEAPONS.length)       G.unlock('all_weapons');
+  if ((Meta.heroesOwned || []).length >= 5)              G.unlock('heroes_5');
+  if (Meta.castle >= CASTLE_MAX)                         G.unlock('castle_max');
+  if ((Meta.streak | 0) >= 7)                            G.unlock('streak_7');
+  if ((Meta.endlessBest | 0) >= 5000)                    G.unlock('endless_5k');
+  if ((Meta.coins | 0) >= 10000)                         G.unlock('rich_10k');
 }
 function claimMission(i){
   const m = missionsToday(), ms = currentMissions()[i];
@@ -3157,16 +3209,55 @@ $('sndBtn2').addEventListener('click', toggleSound);
   if (window.TDSLeaderboard && TDSLeaderboard.ready) showGames();
   document.addEventListener('tds-games-ready', () => { showGames(); if (ac) ac.style.display = ''; });   // PGS additionally lights achievements
   const lbc = $('lbClose'); if (lbc) lbc.addEventListener('click', () => $('lbModal').classList.remove('active'));
-  // monthly-contest tabs + reward popup
+  // contest tabs + reward popup
+  const twb = $('lbTabWeek');  if (twb) twb.addEventListener('click', () => { lbTab = 'week'; renderLb(); });
   const tmb = $('lbTabMonth'); if (tmb) tmb.addEventListener('click', () => { lbTab = 'month'; renderLb(); });
   const tab = $('lbTabAll');   if (tab) tab.addEventListener('click', () => { lbTab = 'all'; renderLb(); });
   const mcl = $('monthClaim'); if (mcl) mcl.addEventListener('click', () => $('monthModal').classList.remove('active'));
+  // starter pack offer popup
+  const spb = $('starterBuy');   if (spb) spb.addEventListener('click', () => { $('starterModal').classList.remove('active'); buyIap('starter'); });
+  const spl = $('starterLater'); if (spl) spl.addEventListener('click', () => $('starterModal').classList.remove('active'));
 }
-// settle last month's contest prizes shortly after boot (the cloud identity arrives async)
+// settle last week's + month's contest prizes shortly after boot (the cloud identity arrives async)
 setTimeout(checkMonthReward, 6000); setTimeout(checkMonthReward, 30000);
+
+/* ---------------- Starter pack one-time offer ---------------- */
+function maybeOfferStarter(){
+  if (Meta.starterBought || Meta.starterSeen || (Meta.unlocked | 0) < 3) return;   // offered once, after level 3
+  if (state.screen !== 'menu' || document.querySelector('.modal.active')) return;  // never stack over another popup
+  Meta.starterSeen = true; Meta.save();
+  const m = $('starterModal'); if (m) m.classList.add('active');
+}
+
+/* ---------------- Local notifications (Android come-back reminders) ----------------
+   Scheduled when the app goes to background, cleared when it returns (nothing fires
+   while playing). No-op on web / until @capacitor/local-notifications is present. */
+const LNotif = (window.Capacitor && Capacitor.isNativePlatform && Capacitor.isNativePlatform() && Capacitor.Plugins) ? Capacitor.Plugins.LocalNotifications : null;
+if (LNotif){
+  setTimeout(() => { try { LNotif.requestPermissions().catch(() => {}); } catch(e){} }, 8000);   // Android 13+ prompt, after the menu settles
+  const clearNotifs = () => { try { LNotif.cancel({ notifications: [{ id: 1 }, { id: 2 }, { id: 3 }] }).catch(() => {}); } catch(e){} };
+  const scheduleNotifs = () => {
+    try {
+      const list = [];
+      regenTickets();
+      if (Meta.pticket < PT_MAX){                            // fires the moment the 🎫 bar refills
+        const at = new Date(Meta.pticketAt + (PT_MAX - Meta.pticket) * PT_REGEN_MS);
+        if (at.getTime() > Date.now() + 60000) list.push({ id: 1, title: '🎫 Tickets refilled!', body: 'Your battle tickets are full — the zombies are waiting!', schedule: { at } });
+      }
+      const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(19, 0, 0, 0);   // tomorrow evening
+      list.push({ id: 2, title: '🔥 Daily reward ready', body: `Day ${streakNext()} login reward is waiting — don't break the streak!`, schedule: { at: t } });
+      const c = new Date(Date.now() + 3 * 86400000); c.setHours(18, 0, 0, 0);      // 3-day comeback nudge
+      list.push({ id: 3, title: '🧟 The zombies are back…', body: 'Your tower misses you, Commander. Come defend it!', schedule: { at: c } });
+      LNotif.schedule({ notifications: list }).catch(() => {});
+    } catch(e){}
+  };
+  document.addEventListener('visibilitychange', () => { if (document.hidden) scheduleNotifs(); else clearNotifs(); });
+  window.addEventListener('pagehide', scheduleNotifs);
+  clearNotifs();                                             // launch → drop anything still pending
+}
 $('tkAd').addEventListener('click', adTicket);
 $('tkClose').addEventListener('click', closeTicketModal);
-setInterval(() => { if (state.screen === 'menu'){ regenTickets(); refreshTikUi(); } }, 1000);   // live 🎫 countdown
+setInterval(() => { if (state.screen === 'menu'){ regenTickets(); refreshTikUi(); maybeOfferStarter(); } }, 1000);   // live 🎫 countdown + one-time starter offer
 $('pauseBtn').addEventListener('click', () => { state.paused = true; refreshSndUi(); $('pauseModal').classList.add('active'); });
 $('resumeBtn').addEventListener('click', () => { state.paused = false; $('pauseModal').classList.remove('active'); });
 $('pauseMenuBtn').addEventListener('click', () => { state.paused = false; $('pauseModal').classList.remove('active'); show('menu'); });

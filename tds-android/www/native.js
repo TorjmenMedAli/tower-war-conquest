@@ -88,6 +88,18 @@
         level_5:   'CgkIuInimZUHEAIQAw',               // "City Cleared" — reach level 5
         level_10:  'CgkIuInimZUHEAIQBA',               // "Survivor" — reach level 10
         veteran:   'CgkIuInimZUHEAIQBQ',               // "Veteran" — 25 battles played
+        // ⇩ second wave — create these in Play Console (PGS → Achievements) and paste the
+        //   CgkI… ids. Each stays a harmless no-op while its id still says "PASTE".
+        veteran100:  'PASTE_veteran100',               // "War Hero" — 100 battles played
+        kills_1k:    'PASTE_kills_1k',                 // "Exterminator" — 1,000 zombies destroyed
+        kills_10k:   'PASTE_kills_10k',                // "Apocalypse Proof" — 10,000 zombies destroyed
+        weapon_max:  'PASTE_weapon_max',               // "Fully Loaded" — max out any weapon
+        all_weapons: 'PASTE_all_weapons',              // "Collector" — own every weapon
+        heroes_5:    'PASTE_heroes_5',                 // "Squad Goals" — own 5 heroes
+        castle_max:  'PASTE_castle_max',               // "Fortress" — max castle stage
+        streak_7:    'PASTE_streak_7',                 // "Devoted" — 7-day login streak
+        endless_5k:  'PASTE_endless_5k',               // "Unstoppable" — 5,000 pts in Endless
+        rich_10k:    'PASTE_rich_10k',                 // "Zombillionaire" — hold 10,000 coins
       },
     };
     const configured = id => id && id.indexOf('PASTE') === -1;

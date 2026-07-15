@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Fredoka:wght@500;600;700&family=Luckiest+Guy&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=82" />
+<link rel="stylesheet" href="style.css?v=83" />
 </head>
 <body>
 <div class="app" id="app">
@@ -382,6 +382,7 @@
     <div class="panel lbpanel">
       <div class="lb-head"><span>🏆 LEADERBOARD</span><button class="modal-x" id="lbClose">✕</button></div>
       <div class="lb-tabs">
+        <button class="lb-tab" id="lbTabWeek">WEEKLY</button>
         <button class="lb-tab active" id="lbTabMonth">MONTHLY</button>
         <button class="lb-tab" id="lbTabAll">ALL-TIME</button>
       </div>
@@ -413,6 +414,19 @@
     </div>
   </div>
 
+  <!-- STARTER PACK one-time offer (shown once after level 3) -->
+  <div class="modal" id="starterModal">
+    <div class="panel namepanel">
+      <div class="month-troph">🎁</div>
+      <div class="name-title">STARTER PACK</div>
+      <div class="month-sub">One-time deal for new commanders!</div>
+      <div class="starter-items"><span>💎 <b>500</b> gems</span><span>🪙 <b>5,000</b> coins</span></div>
+      <div class="starter-strike"><s>$14.99</s> <b>-80%</b></div>
+      <button class="big-btn green" id="starterBuy">GET IT · $2.99</button>
+      <button class="starter-later" id="starterLater">Maybe later</button>
+    </div>
+  </div>
+
   <div class="flash" id="flash"></div>
 
   <!-- Connectivity gate — this game requires an internet connection to play -->
@@ -441,11 +455,11 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-remote-config-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-<script src="firebase.js?v=5"></script>
+<script src="firebase.js?v=6"></script>
 <script src="cloud.js?v=3"></script>
-<script src="leaderboard.js?v=2"></script>
-<script src="native.js?v=7"></script>
+<script src="leaderboard.js?v=3"></script>
+<script src="native.js?v=8"></script>
 <script src="iap.js?v=1"></script>
-<script src="game.js?v=141"></script>
+<script src="game.js?v=142"></script>
 </body>
 </html>

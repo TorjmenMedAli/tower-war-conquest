@@ -55,7 +55,12 @@
     // rating popups — shown every `rate_popup_every` games; flip each OFF/ON from the console any time
     rate_popup_enabled:        true,   // popup 1: star picker (4-5★ → store page, 1-3★ → thank you)
     rate_reward_popup_enabled: true,   // popup 2: "give us 5 stars and get 1000 coins"
-    rate_popup_every:          5       // cadence, in games played
+    rate_popup_every:          5,      // cadence, in games played
+    // weekly / monthly contest prizes (gems) — tune live from the console, no app update needed
+    month_prize_top3:  1000,           // monthly contest: ranks 1-3
+    month_prize_top10: 300,            // monthly contest: ranks 4-10
+    week_prize_top3:   300,            // weekly contest: ranks 1-3
+    week_prize_top10:  100             // weekly contest: ranks 4-10
   };
 
   // How fresh Remote Config must be. 1h is a sane production value; while wiring things up

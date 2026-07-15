@@ -28,6 +28,13 @@
    │                   && request.resource.data.total >= 0                        │
    │                   && request.resource.data.total <= 1000000000;              │
    │    }                                                                         │
+   │    match /weekly/{week}/scores/{uid} {   // same rule as monthly             │
+   │      allow read: if request.auth != null;                                    │
+   │      allow write: if request.auth != null && request.auth.uid == uid         │
+   │                   && request.resource.data.total is int                      │
+   │                   && request.resource.data.total >= 0                        │
+   │                   && request.resource.data.total <= 1000000000;              │
+   │    }                                                                         │
    └──────────────────────────────────────────────────────────────────────────────┘ */
 (function () {
   'use strict';
@@ -35,18 +42,32 @@
   function pad2(n) { return (n < 10 ? '0' : '') + n; }
   function monthKey(d) { d = d || new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1); }
   function prevMonthKey() { var d = new Date(); return monthKey(new Date(d.getFullYear(), d.getMonth() - 1, 1)); }
+  function weekKey(d) {                                    // ISO week, e.g. "2026-W29"
+    d = d ? new Date(d) : new Date();
+    var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    var dn = t.getUTCDay() || 7;
+    t.setUTCDate(t.getUTCDate() + 4 - dn);                 // shift to the Thursday of this week
+    var y = t.getUTCFullYear();
+    var w = Math.ceil(((t - Date.UTC(y, 0, 1)) / 86400000 + 1) / 7);
+    return y + '-W' + pad2(w);
+  }
+  function prevWeekKey() { return weekKey(Date.now() - 7 * 86400000); }
 
   var api = window.TDSLeaderboard = {
     ready: false,
     uid: function () { return null; },
     monthKey: monthKey,
     prevMonthKey: prevMonthKey,
+    weekKey: weekKey,
+    prevWeekKey: prevWeekKey,
     submit: function () { return Promise.resolve(); },
     top: function () { return Promise.resolve([]); },
     submitMonthly: function () { return Promise.resolve(); },
-    // resolves null on FAILURE and [] on a genuinely empty board — callers granting
+    submitWeekly: function () { return Promise.resolve(); },
+    // top*: resolve null on FAILURE and [] on a genuinely empty board — callers granting
     // rewards must treat null as "retry later", never as "nobody played".
     topMonthly: function () { return Promise.resolve(null); },
+    topWeekly: function () { return Promise.resolve(null); },
   };
 
   var cap = window.Capacitor;
@@ -129,6 +150,24 @@
   };
   api.topMonthly = function (month, n) {
     return Promise.resolve(backend.top('monthly/' + (month || monthKey()) + '/scores', 'total', n || 100))
+      .catch(function () { return null; });
+  };
+
+  // ── WEEKLY CONTEST: same shape as monthly at weekly/{YYYY-Www}/scores/{uid} ──
+  api.submitWeekly = function (name, total, week) {
+    var id = uid(), w = week || weekKey();
+    if (!id || !(total > 0)) return Promise.resolve();
+    return Promise.resolve(backend.set('weekly/' + w + '/scores/' + id, {
+      uid: id,
+      name: String(name || 'Player').slice(0, 16),
+      total: Math.round(total),
+      week: w,
+      platform: platform,
+      updated: Date.now(),
+    })).catch(function () {});
+  };
+  api.topWeekly = function (week, n) {
+    return Promise.resolve(backend.top('weekly/' + (week || weekKey()) + '/scores', 'total', n || 100))
       .catch(function () { return null; });
   };
 })();
