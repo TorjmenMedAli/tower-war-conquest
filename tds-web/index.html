@@ -3,127 +3,99 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-<title>Zombie Tower Defense</title>
+<title>Tower War: Tactical Conquest</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Fredoka:wght@500;600;700&family=Luckiest+Guy&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=84" />
+<link rel="stylesheet" href="style.css?v=101" />
 </head>
 <body>
 <div class="app" id="app">
   <canvas id="cv"></canvas>
   <div class="scrim"></div>
 
-  <!-- ===================== MENU / GARAGE ===================== -->
+  <!-- ===================== LOADING ===================== -->
+  <div class="loading" id="loading">
+    <div class="ld-logo"><span class="logo-top">TOWER&nbsp;WAR</span><span class="logo-bot">CONQUEST</span></div>
+    <div class="ld-bar"><i id="ldFill"></i></div>
+    <div class="ld-txt" id="ldTxt">Deploying troops…</div>
+  </div>
+
+  <!-- ===================== MENU / HOME ===================== -->
   <section class="screen" id="menu">
     <header class="topbar">
-      <div class="chip avatar"><span class="ico">🤠</span><b>Lv 1</b></div>
+      <button class="chip avatar" id="toProfile"><span class="ico">⭐</span><b id="m_plv">Lv 1</b></button>
       <div class="chip coin"><span class="ico ic-coin"></span><b id="m_coins">0</b></div>
       <div class="chip gem"><span class="ico ic-gem"></span><b id="m_gems">0</b></div>
       <button class="chip streak" id="toStreak"><span class="ico">🔥</span><b id="streakN">1</b></button>
     </header>
     <button class="chip snd" id="sndBtn" aria-label="Sound"><span class="ico">🔊</span></button>
-    <button class="chip missions" id="missionBtn" aria-label="Daily missions"><span class="ico">📋</span><span class="mdot" id="missionDot" style="display:none"></span></button>
-    <!-- Play Games Services (Android): shown only once signed in; no-op / hidden on web -->
+    <button class="chip missions" id="missionBtn" aria-label="Daily quests"><span class="ico">📋</span><span class="mdot" id="missionDot" style="display:none"></span></button>
     <div class="games-btns" id="gamesBtns" style="display:none">
       <button class="chip games" id="btnLeaderboard" aria-label="Leaderboards"><span class="ico">🏆</span></button>
       <button class="chip games" id="btnAchievements" aria-label="Achievements"><span class="ico">🎖️</span></button>
     </div>
 
     <div class="logo">
-      <span class="logo-top">ZOMBIE&nbsp;TOWER</span>
-      <span class="logo-bot">DEFENSE</span>
+      <span class="logo-top">TOWER&nbsp;WAR</span>
+      <span class="logo-bot">CONQUEST</span>
     </div>
 
-    <button class="stage" id="toLevels">
-      <span class="stage-no" id="m_levelno">1</span>
-      <span class="stage-name" id="m_levelname">ZOMBIE CITY</span>
-      <span class="stage-go">▸</span>
+    <!-- campaign card: region + level, with a live map preview -->
+    <button class="campaign" id="toLevels">
+      <span class="cp-region" id="m_region">GREEN VALLEY</span>
+      <span class="cp-level">LEVEL <b id="m_levelno">1</b></span>
+      <span class="cp-prog"><i id="m_regionFill"></i></span>
+      <span class="cp-sub" id="m_regionSub">0 / 20 captured</span>
     </button>
+    <div class="map-preview" id="mapPreview"><canvas id="pv" width="300" height="200"></canvas></div>
 
-    <!-- showcase: castle base (fixed at current stage) with the equipped hero standing in front -->
-    <div class="hero-stage" id="heroStage">
-      <div class="castle-scene">
-        <div class="castle-box" id="castleBox"></div>
-      </div>
-      <button class="castle-upg" id="castleUpg" aria-label="Upgrade castle">
-        <span class="cu-ico">🏰</span>
-        <span class="cu-txt"><b>CASTLE</b><i id="castleStage">Stage 1 / 7</i></span>
-        <span class="cu-cost" id="castleCostBox"><span class="ico ic-coin"></span><b id="castleCostV">60</b></span>
-      </button>
-      <button class="castle-upg-ad" id="castleUpgAd" style="display:none">▶ FREE</button>
-    </div>
-
-    <!-- loadout: equipped weapon + hero shown directly (tap to swap · ⬆ opens the garage) -->
+    <!-- army: equipped soldier + tank (tap to swap · ⬆ upgrades) -->
     <div class="loadout">
-      <div class="load-card" id="loadWeapon" role="button" tabindex="0">
+      <div class="load-card" id="loadSoldier" role="button" tabindex="0">
         <div class="lc-top">
-          <span class="lc-art" id="lc_wpnArt">🔫</span>
-          <span class="lc-info"><b id="lc_wpnName">WEAPON</b><i id="lc_wpnLv">Lv 1</i></span>
+          <span class="lc-art" id="lc_solArt"></span>
+          <span class="lc-info"><b id="lc_solName">SOLDIER</b><i id="lc_solLv">Lv 1</i></span>
         </div>
-        <button class="lc-upg" id="lc_wpnUpg" aria-label="Upgrade weapon">⬆</button>
+        <button class="lc-upg" id="lc_solUpg" aria-label="Upgrade soldier">⬆</button>
       </div>
-      <div class="load-card" id="loadHero" role="button" tabindex="0">
+      <div class="load-card" id="loadTank" role="button" tabindex="0">
         <div class="lc-top">
-          <span class="lc-art" id="lc_heroArt"></span>
-          <span class="lc-info"><b id="lc_heroName">HERO</b><i id="lc_heroRarity">Lv 1</i></span>
+          <span class="lc-art" id="lc_tnkArt"></span>
+          <span class="lc-info"><b id="lc_tnkName">TANK</b><i id="lc_tnkLv">Lv 1</i></span>
         </div>
-        <button class="lc-upg" id="lc_heroUpg" aria-label="Upgrade hero">⬆</button>
+        <button class="lc-upg" id="lc_tnkUpg" aria-label="Upgrade tank">⬆</button>
       </div>
     </div>
 
-    <div class="ftue" id="ftuePlay" style="display:none">👇 TAP PLAY TO BATTLE!</div>
+    <div class="ftue" id="ftuePlay" style="display:none">👇 TAP PLAY TO CONQUER!</div>
     <div class="tik"><span class="tik-ico">🎫</span><b id="tikN">10</b><i>/10</i><em id="tikT"></em></div>
     <button class="play imgbtn" id="playBtn" aria-label="Play"></button>
     <nav class="nav">
       <button class="navbtn" id="toShop"><span>🛒</span><i>SHOP</i></button>
+      <button class="navbtn" id="toTroops"><span>🪖</span><i>TROOPS</i></button>
       <button class="navbtn cur"><span>⚔️</span><i>BATTLE</i></button>
-      <button class="navbtn" id="toWeapons"><span>🔫</span><i>WEAPONS</i></button>
-      <button class="navbtn" id="toHeroes"><span>🦸</span><i>HEROES</i></button>
-      <button class="navbtn" id="toForces"><span>🏰</span><i>TOWER</i></button>
+      <button class="navbtn" id="toPvp"><span>🏆</span><i>PVP</i></button>
+      <button class="navbtn" id="toMissions"><span>🗺️</span><i>MISSIONS</i></button>
     </nav>
   </section>
 
-  <!-- ===================== GAME HUD ===================== -->
+  <!-- ===================== BATTLE HUD ===================== -->
   <section class="screen" id="game">
     <div class="hud-top">
       <button class="pause" id="pauseBtn">⏸</button>
       <div class="hud-mid">
-        <div class="journey">
-          <div class="track"><div class="fill" id="progFill"></div>
-            <span class="jn dot" style="left:16%"></span>
-            <span class="jn chip" style="left:33%"></span>
-            <span class="jn dot" style="left:50%"></span>
-            <span class="jn chip" style="left:67%"></span>
-            <span class="jn dot" style="left:84%"></span>
-          </div>
-          <div class="boss">👹</div>
-        </div>
-        <div class="hpstack">
-          <div class="hpbar">
-            <span class="hp-ico">❤️</span>
-            <div class="hp-track"><i class="hp-fill" id="hpFill"></i></div>
-            <b class="hp-txt" id="hpTxt">180</b>
-          </div>
-          <div class="hpbar wagonbar">
-            <span class="hp-ico">🛡️</span>
-            <div class="hp-track"><i class="hp-fill wagon" id="hpWagon"></i></div>
-            <b class="hp-txt" id="hpWagonTxt">60</b>
-          </div>
+        <div class="terr">
+          <div class="terr-track"><i class="terr-me" id="terrMe"></i><i class="terr-foe" id="terrFoe"></i><span class="terr-mark" id="terrMark"></span></div>
+          <div class="terr-lbl"><span id="hudLevel">LEVEL 1</span><span id="hudTime">0:00</span></div>
         </div>
       </div>
-      <div class="coinchip"><span class="ico ic-coin"></span><b id="g_score">0</b></div>
+      <button class="hud-speed" id="speedBtn">1×</button>
     </div>
-
-    <div class="ftue ftue-deploy" id="ftueDeploy" style="display:none">👇 DEPLOY A FORCE!</div>
-    <!-- Hero ultimate: charge meter fills via --fill; glows + becomes tappable when ready -->
-    <button class="ultbtn" id="ultBtn" style="display:none"><span class="ult-ic">⚡</span><span class="ult-tx">ULT</span></button>
+    <div class="ftue ftue-deploy" id="ftueSwipe" style="display:none">👆 SWIPE FROM YOUR TOWER TO AN ENEMY</div>
     <div class="hud-bottom">
-      <div class="sf-head">
-        <div class="points"><span class="blt big"></span><b id="g_energy">0</b><i>PTS</i></div>
-        <span class="sf-label">SPECIAL FORCES</span>
-      </div>
-      <div class="sfbar" id="sfBar"><!-- special-force buttons injected by game.js --></div>
+      <button class="bomb-btn" id="bombBtn"><span class="bb-ico">💣</span><span class="bb-txt"><b>AIR STRIKE</b><i id="bombN">×0</i></span></button>
+      <div class="hud-hint" id="hudHint">Swipe between towers · swipe across a line to cut it</div>
     </div>
   </section>
 
@@ -135,96 +107,66 @@
       <div class="chip gem"><span class="ico ic-gem"></span><b id="sh_gems">0</b></div>
     </header>
     <div class="shop-tabs">
-      <button class="shtab cur" data-tab="free"><span>🎁</span>FREE</button>
-      <button class="shtab" data-tab="boxes"><span>📦</span>BOXES</button>
-      <button class="shtab" data-tab="power"><span>💪</span>POWER</button>
-      <button class="shtab" data-tab="coins"><span>🪙</span>COINS</button>
+      <button class="shtab cur" data-tab="free"><span>🎁</span>DAILY</button>
+      <button class="shtab" data-tab="boxes"><span>📦</span>CHESTS</button>
+      <button class="shtab" data-tab="power"><span>💣</span>ITEMS</button>
+      <button class="shtab" data-tab="coins"><span>🪙</span>GOLD</button>
       <button class="shtab" data-tab="gems"><span>💎</span>GEMS</button>
     </div>
     <div class="shop-body" id="shopBody"></div>
     <button class="play imgbtn battle" id="toBattle" aria-label="Battle"></button>
   </section>
 
-  <!-- ===================== LEVELS ===================== -->
+  <!-- ===================== LEVELS (region map) ===================== -->
   <section class="screen" id="levels">
     <header class="topbar solid levels-top">
       <button class="iconbtn" id="levelsBack" aria-label="Back">‹</button>
-      <div class="title">SELECT LEVEL</div>
+      <div class="title" id="lv_title">REGION</div>
       <div class="chip coin"><span class="ico ic-coin"></span><b id="lv_coins">0</b></div>
     </header>
-    <div class="levelmap" id="levelMap"><!-- 10 nodes injected by game.js --></div>
-    <!-- Endless / survival mode — appears once the final level is beaten -->
-    <button class="endless-btn" id="endlessBtn" style="display:none">♾️ ENDLESS SURVIVAL <i id="endlessBest"></i></button>
+    <div class="region-tabs" id="regionTabs"></div>
+    <div class="levelgrid" id="levelMap"></div>
   </section>
 
-  <!-- ===================== WEAPONS ===================== -->
-  <section class="screen" id="weapons">
+  <!-- ===================== TROOPS (soldiers + tanks) ===================== -->
+  <section class="screen" id="troops">
     <header class="topbar solid">
-      <button class="iconbtn" id="weaponsBack" aria-label="Back">‹</button>
-      <div class="title">WEAPONS</div>
-      <div class="chip coin"><span class="ico ic-coin"></span><b id="wp_coins">0</b></div>
+      <button class="iconbtn" id="troopsBack" aria-label="Back">‹</button>
+      <div class="title">TROOPS</div>
+      <div class="chip gem"><span class="ico ic-gem"></span><b id="tr_gems">0</b></div>
     </header>
-    <p class="weapon-hint" id="wp_eqcount">2 / 2 mounted</p>
-    <div class="weapon-grid" id="weaponGrid"><!-- weapon cards injected by game.js --></div>
-    <p class="weapon-hint">Buy weapons, then mount up to 2 on your castle. Tap ⬆ to upgrade.</p>
-  </section>
-
-  <!-- ===================== HEROES ===================== -->
-  <section class="screen" id="heroes">
-    <header class="topbar solid">
-      <button class="iconbtn" id="heroesBack" aria-label="Back">‹</button>
-      <div class="title">HEROES</div>
-      <div class="chip coin"><span class="ico ic-coin"></span><b id="hr_coins">0</b></div>
-    </header>
-    <div class="hero-grid" id="heroGrid"><!-- hero cards injected by game.js --></div>
-    <p class="weapon-hint">Equip one hero to defend the castle. Tap ⬆ to upgrade it.</p>
-  </section>
-
-  <!-- ===================== FORCES (castle stats + special forces) ===================== -->
-  <section class="screen" id="forces">
-    <header class="topbar solid">
-      <button class="iconbtn" id="forcesBack" aria-label="Back">‹</button>
-      <div class="title">TOWER</div>
-      <div class="chip coin"><span class="ico ic-coin"></span><b id="fo_coins">0</b></div>
-    </header>
-    <div class="forces-wrap">
-      <h3 class="sec-title">🏰 CASTLE</h3>
-      <div class="castle-stats">
-        <div class="stat" data-stat="hp">
-          <span class="sico">❤️</span>
-          <div class="sinfo"><span class="sname">HP <i class="slv" id="l_hp">Lv 1</i></span><span class="sval" id="s_hp">220</span></div>
-          <button class="upg adfree" data-adact="hp" style="display:none">▶ FREE</button>
-          <button class="upg" data-act="hp"><span class="ico ic-coin"></span><b id="c_hp">40</b></button>
-        </div>
-        <div class="stat" data-stat="dmg">
-          <span class="sico">🔫</span>
-          <div class="sinfo"><span class="sname">DAMAGE <i class="slv" id="l_dmg">Lv 1</i></span><span class="sval" id="s_dmg">100%</span></div>
-          <button class="upg adfree" data-adact="dmg" style="display:none">▶ FREE</button>
-          <button class="upg" data-act="dmg"><span class="ico ic-coin"></span><b id="c_dmg">45</b></button>
-        </div>
-        <div class="stat" data-stat="pow">
-          <span class="sico blt"></span>
-          <div class="sinfo"><span class="sname">POWER <i class="slv" id="l_pow">Lv 1</i></span><span class="sval" id="s_pow">1.0/s</span></div>
-          <button class="upg adfree" data-adact="pow" style="display:none">▶ FREE</button>
-          <button class="upg" data-act="pow"><span class="ico ic-coin"></span><b id="c_pow">50</b></button>
-        </div>
-      </div>
-      <h3 class="sec-title">🛻 WAGON</h3>
-      <div class="wagon-card">
-        <div class="wagon-art" id="wagonArt"></div>
-        <div class="castle-stats">
-          <div class="stat" data-stat="wagon">
-            <span class="sico">🛡️</span>
-            <div class="sinfo"><span class="sname">ARMOR <i class="slv" id="l_wagon">Lv 1</i></span><span class="sval" id="s_wagon">+0 HP</span></div>
-            <button class="upg adfree" data-adact="wagon" style="display:none">▶ FREE</button>
-          <button class="upg" data-act="wagon"><span class="ico ic-coin"></span><b id="c_wagon">70</b></button>
-          </div>
-        </div>
-      </div>
-      <h3 class="sec-title">🪖 SPECIAL FORCES</h3>
-      <div class="sf-grid" id="sfGrid"><!-- special-force cards injected by game.js --></div>
-      <p class="weapon-hint">Summon these in battle with points. Upgrade them here for coins.</p>
+    <div class="troop-tabs">
+      <button class="shtab cur" data-ttab="soldier"><span>🪖</span>SOLDIERS</button>
+      <button class="shtab" data-ttab="tank"><span>🛡️</span>TANKS</button>
     </div>
+    <div class="troop-body" id="troopBody"></div>
+    <button class="summon-btn" id="summonBtn">🎲 SUMMON · <span class="ico ic-gem"></span><b id="summonCost">25</b></button>
+  </section>
+
+  <!-- ===================== PVP ===================== -->
+  <section class="screen" id="pvp">
+    <header class="topbar solid">
+      <button class="iconbtn" id="pvpBack" aria-label="Back">‹</button>
+      <div class="title">PVP ARENA</div>
+      <div class="chip trophy"><span class="ico">🏆</span><b id="pv_lp">0</b></div>
+    </header>
+    <div class="pvp-wrap">
+      <div class="league-card" id="leagueCard"></div>
+      <div class="vs-row" id="vsRow"></div>
+      <button class="big-btn green pvp-fight" id="pvpFight">⚔️ FIGHT · +30 🏆</button>
+      <button class="rlink" id="pvpReroll">↻ Find another opponent</button>
+      <p class="weapon-hint">Win to climb the league. Lose and you drop points.</p>
+    </div>
+  </section>
+
+  <!-- ===================== SPECIAL MISSIONS ===================== -->
+  <section class="screen" id="missions">
+    <header class="topbar solid">
+      <button class="iconbtn" id="missionsBack" aria-label="Back">‹</button>
+      <div class="title">SPECIAL OPS</div>
+      <div class="chip coin"><span class="ico ic-coin"></span><b id="ms_coins">0</b></div>
+    </header>
+    <div class="ops-wrap" id="opsWrap"></div>
   </section>
 
   <!-- ===================== MODALS ===================== -->
@@ -233,11 +175,11 @@
       <h2>PAUSED</h2>
       <button class="big-btn green" id="resumeBtn">RESUME</button>
       <button class="big-btn green" id="sndBtn2">🔊 SOUND: ON</button>
+      <button class="big-btn blue" id="restartBtn">↻ RESTART</button>
       <button class="big-btn red" id="pauseMenuBtn">MENU</button>
     </div>
   </div>
 
-  <!-- VICTORY (level cleared) -->
   <div class="modal result" id="victoryModal">
     <div class="rcard victory">
       <div class="rrays"></div>
@@ -247,6 +189,7 @@
         </div>
         <div class="rtitle vict">VICTORY</div>
         <div class="rstars" id="vicStars"></div>
+        <div class="rsub" id="vicSub"></div>
         <div class="rcoinpill"><svg class="ic" width="26" height="26" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="#e0982a" stroke="#0a1a38" stroke-width="2.5"/><circle cx="16" cy="16" r="9" fill="#ffd24a" stroke="#b07d22" stroke-width="2"/></svg><span>+<b id="vicCoins">0</b></span></div>
         <button class="rbtn ad" id="vicDouble"></button>
         <button class="rlink" id="vicContinue">Continue →</button>
@@ -254,18 +197,14 @@
     </div>
   </div>
 
-  <!-- DEFEAT (base fell) -->
   <div class="modal result" id="defeatModal">
     <div class="rcard defeat">
       <div class="rbody">
-        <div class="rwreck">
-          <svg width="150" height="98" viewBox="0 0 160 120"><ellipse cx="80" cy="106" rx="58" ry="9" fill="#000" opacity=".3"/><g transform="rotate(-8 80 72)"><rect x="24" y="76" width="112" height="26" rx="13" fill="#2c333d" stroke="#0a1a38" stroke-width="4"/><circle cx="46" cy="89" r="9" fill="#454e5c" stroke="#0a1a38" stroke-width="3.5"/><circle cx="80" cy="89" r="9" fill="#454e5c" stroke="#0a1a38" stroke-width="3.5"/><circle cx="114" cy="89" r="9" fill="#454e5c" stroke="#0a1a38" stroke-width="3.5"/><rect x="48" y="48" width="64" height="30" rx="10" fill="#5a6473" stroke="#0a1a38" stroke-width="4"/><rect x="104" y="40" width="40" height="11" rx="4" fill="#454e5c" stroke="#0a1a38" stroke-width="4" transform="rotate(28 104 46)"/><path d="M68 60 l8 8 M76 60 l-8 8" stroke="#0a1a38" stroke-width="3.5" stroke-linecap="round"/><path d="M88 60 l8 8 M96 60 l-8 8" stroke="#0a1a38" stroke-width="3.5" stroke-linecap="round"/></g><path d="M122 34 q9 -11 2 -22 q11 7 6 18" fill="#9aa0a6" opacity=".5"/><path d="M134 44 q7 -8 1 -16 q8 5 4 13" fill="#9aa0a6" opacity=".4"/></svg>
-        </div>
+        <div class="rwreck"><div class="rskull">💀</div></div>
         <div class="rtitle def">DEFEAT</div>
-        <div class="rsub">Your base fell — collect your coins, upgrade, and push further!</div>
+        <div class="rsub" id="defSub">Your towers fell. Boost your troops and try again!</div>
         <div class="rcoinpill"><svg class="ic" width="26" height="26" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="#e0982a" stroke="#0a1a38" stroke-width="2.5"/><circle cx="16" cy="16" r="9" fill="#ffd24a" stroke="#b07d22" stroke-width="2"/></svg><span>+<b id="defCoins">0</b></span></div>
-        <button class="rbtn green" id="defRevive"></button>
-        <button class="rbtn gold" id="defDouble"></button>
+        <button class="rbtn ad" id="defBoost">▶ RETRY WITH ×3 TROOPS</button>
         <button class="rbtn blue" id="defRetry">RETRY</button>
         <button class="rbtn green" id="defSkip" style="display:none">🎟️ SKIP LEVEL</button>
         <button class="rlink" id="defMenu">Menu →</button>
@@ -273,7 +212,6 @@
     </div>
   </div>
 
-  <!-- REWARD reveal (4-game streak chest + level-cleared spoils) -->
   <div class="modal result" id="rewardModal">
     <div class="rcard reward">
       <div class="rhead">REWARD!</div>
@@ -289,8 +227,6 @@
     </div>
   </div>
 
-  <!-- RATE US · 5★ → +1000 coins -->
-  <!-- RATE US star picker (popup 1): 4-5★ → store page · 1-3★ → thank-you (remote-config gated) -->
   <div class="modal result" id="rateStarsModal">
     <div class="rcard reward">
       <div class="rhead">RATE US!</div>
@@ -320,7 +256,6 @@
     </div>
   </div>
 
-  <!-- DAILY STREAK -->
   <div class="modal" id="streakModal">
     <div class="rcard streak">
       <div class="rhead">🔥 DAILY STREAK</div>
@@ -335,7 +270,6 @@
     </div>
   </div>
 
-  <!-- OUT OF TICKETS (battle entry) -->
   <div class="modal result" id="ticketModal">
     <div class="rcard reward">
       <div class="rhead">🎫 OUT OF TICKETS</div>
@@ -348,7 +282,6 @@
     </div>
   </div>
 
-  <!-- Rewarded-ad simulation overlay -->
   <div class="modal adov" id="adModal">
     <div class="adbox">
       <span class="adtag">AD</span>
@@ -358,27 +291,40 @@
     </div>
   </div>
 
-  <!-- STORY intro card (first entry to a level) -->
+  <!-- Level intro (new mechanic tutorial card) -->
   <div class="modal" id="storyModal">
     <div class="panel storycard">
       <div class="story-lv" id="stLevel">LEVEL 1</div>
-      <div class="story-name" id="stName">ZOMBIE CITY</div>
-      <p class="story-text" id="stText"></p>
+      <div class="story-name" id="stName">NEW MECHANIC</div>
       <div class="story-boss" id="stBoss"></div>
+      <p class="story-text" id="stText"></p>
       <button class="big-btn green" id="stBegin">BEGIN ▸</button>
     </div>
   </div>
 
-  <!-- DAILY MISSIONS -->
-  <div class="modal" id="missionModal">
-    <div class="panel missionpanel">
-      <div class="missions-head"><span>📋 DAILY MISSIONS</span><button class="modal-x" id="missionClose">✕</button></div>
-      <div class="mission-list" id="missionList"></div>
-      <div class="missions-foot">New missions every day</div>
+  <!-- Summon result -->
+  <div class="modal result" id="summonModal">
+    <div class="rcard reward">
+      <div class="rhead" id="smHead">NEW TROOP!</div>
+      <div class="rbody">
+        <div class="ricon" id="smIcon"></div>
+        <div class="rtitle small" id="smTitle">RECRUIT</div>
+        <div class="rtag" id="smTag">COMMON</div>
+        <div class="rsub" id="smDesc"></div>
+        <button class="rbtn green" id="smOk">AWESOME</button>
+        <button class="rbtn gold" id="smAgain">🎲 SUMMON AGAIN · 25 💎</button>
+      </div>
     </div>
   </div>
 
-  <!-- GLOBAL LEADERBOARD (Firestore) -->
+  <div class="modal" id="missionModal">
+    <div class="panel missionpanel">
+      <div class="missions-head"><span>📋 DAILY QUESTS</span><button class="modal-x" id="missionClose">✕</button></div>
+      <div class="mission-list" id="missionList"></div>
+      <div class="missions-foot">New quests every day</div>
+    </div>
+  </div>
+
   <div class="modal" id="lbModal">
     <div class="panel lbpanel">
       <div class="lb-head"><span>🏆 LEADERBOARD</span><button class="modal-x" id="lbClose">✕</button></div>
@@ -390,11 +336,10 @@
       <div class="lb-prizes" id="lbPrizes">🥇🥈🥉 <b>1000</b> 💎 &nbsp;•&nbsp; #4–10 <b>300</b> 💎</div>
       <div class="lb-you" id="lbYou"></div>
       <div class="lb-list" id="lbList"><div class="lb-empty">Loading…</div></div>
-      <div class="lb-foot" id="lbFoot">Best single-run score · updates after each battle</div>
+      <div class="lb-foot" id="lbFoot">Best battle score · updates after each battle</div>
     </div>
   </div>
 
-  <!-- NICKNAME prompt (first leaderboard use) -->
   <div class="modal" id="nameModal">
     <div class="panel namepanel">
       <div class="name-title">CHOOSE A NICKNAME</div>
@@ -404,7 +349,6 @@
     </div>
   </div>
 
-  <!-- MONTHLY CONTEST prize (granted at the start of the next month) -->
   <div class="modal" id="monthModal">
     <div class="panel namepanel">
       <div class="month-troph">🏆</div>
@@ -415,42 +359,41 @@
     </div>
   </div>
 
-  <!-- STARTER PACK one-time offer (shown once after level 3) -->
   <div class="modal" id="starterModal">
     <div class="panel namepanel">
       <div class="month-troph">🎁</div>
       <div class="name-title">STARTER PACK</div>
       <div class="month-sub">One-time deal for new commanders!</div>
-      <div class="starter-items"><span>💎 <b>500</b> gems</span><span>🪙 <b>5,000</b> coins</span></div>
+      <div class="starter-items"><span>💎 <b>500</b> gems</span><span>🪙 <b>5,000</b> gold</span></div>
       <div class="starter-strike"><s>$14.99</s> <b>-80%</b></div>
       <button class="big-btn green" id="starterBuy">GET IT · $2.99</button>
       <button class="starter-later" id="starterLater">Maybe later</button>
     </div>
   </div>
 
+  <!-- Profile / stats -->
+  <div class="modal" id="profileModal">
+    <div class="panel namepanel">
+      <div class="month-troph">⭐</div>
+      <div class="name-title" id="pfTitle">COMMANDER · Lv 1</div>
+      <div class="xp-bar"><i id="pfXp"></i></div>
+      <div class="pf-stats" id="pfStats"></div>
+      <button class="big-btn green" id="pfClose">CLOSE</button>
+    </div>
+  </div>
+
   <div class="flash" id="flash"></div>
 
-  <!-- Connectivity gate — this game requires an internet connection to play -->
   <div class="netgate" id="netGate" role="alertdialog" aria-live="assertive">
     <div class="netgate-card">
       <div class="netgate-icon">📡</div>
       <div class="netgate-title">NO CONNECTION</div>
-      <div class="netgate-sub">Zombie Tower Defense needs an internet connection to play. Please check your network and try again.</div>
+      <div class="netgate-sub">Tower War needs an internet connection to play. Please check your network and try again.</div>
       <button class="big-btn netgate-btn" id="netRetry">RETRY</button>
     </div>
   </div>
 </div>
-<script src="weapons-art.js?v=26"></script>
-<script src="castle-art.js?v=26"></script>
-<script src="tank-art.js?v=26"></script>
-<script src="hero-art.js?v=26"></script>
-<script src="arsenal-art.js?v=26"></script>
-<script src="undead-art.js?v=28"></script>
-<script src="monster-art.js?v=26"></script>
-<script src="heroes-art.js?v=27"></script>
-<script src="ranks-art.js?v=1"></script>
-<script src="sfx.js?v=3"></script>
-<!-- Firebase Analytics + Remote Config + Auth + Firestore (compat SDK from Google's CDN; loads in the browser AND the Android WebView) -->
+<script src="sfx.js?v=4"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-analytics-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-remote-config-compat.js"></script>
@@ -461,6 +404,7 @@
 <script src="leaderboard.js?v=3"></script>
 <script src="native.js?v=22"></script>
 <script src="iap.js?v=4"></script>
-<script src="game.js?v=156"></script>
+<script src="troops-art.js?v=1"></script>
+<script src="game.js?v=200"></script>
 </body>
 </html>

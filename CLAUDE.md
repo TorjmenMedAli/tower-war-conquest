@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A workspace for **Tower Destiny Survive (TDS)** — a 2D side-scrolling tower-defense / advance hybrid — implemented multiple times, plus the tooling and art pipeline that feed the builds:
+A workspace for **Tower War: Conquest** (formerly *Tower Destiny Survive / Zombie Tower Defense*). Since Sept 2026 `tds-web/` is a **swipe-to-conquer tower strategy game** in the style of *Tower War – Tactical Conquest* (towers breed troops, swipe routes between towers, capture the map; 100-level campaign, Special Ops, PvP vs bots, troop collection). The older Godot ports below still contain the previous side-scroller design:
 
 - **`tds-web/`** — the **actively developed** standalone browser build (HTML/CSS/JS, no build step, no server). This is where most work happens; it's the source of truth for gameplay/balance.
 - **`tds-godot/`** — a **Godot 4.6 port of `tds-web`** (made by copying tds-web, then rewriting it in GDScript). Faithful gameplay/tuning, procedural `_draw()` art, reuses the PNG backgrounds. Run it with `Godot.exe --path tds-godot --import` (once) then `--path tds-godot`. See `tds-godot/README.md`.
@@ -19,18 +19,18 @@ The game builds are independent codebases that share design and art, not code. S
 No build, no bundler, no package manager. **Run it by opening `tds-web/index.html` in a browser.** `index.html#play` boots straight into a run, skipping the menu.
 
 ### Architecture
-- `index.html` — markup + the seven screens (`menu`, `game`, `shop`, `levels`, `weapons`, `heroes`, `forces`), then a fixed-order list of `<script>` tags.
+- `index.html` — markup + the screens (`loading`, `menu`, `game`, `shop`, `levels`, `troops`, `pvp`, `missions`), then a fixed-order list of `<script>` tags.
 - `style.css` — the entire "glossy candy" UI (CSS gradients / bevels / shadows). ~62 KB.
-- `game.js` — the whole engine in one file (~3 KB lines): gameplay, Canvas rendering, UI wiring, and save/load. Loaded **last** because it consumes the art modules as globals.
-- `*-art.js` — procedural art modules, each exposing a global (e.g. `WeaponArt`, `HeroArt`, `TankArt`, `CastleArt`, `Arsenal`, `UndeadArt`, `MonsterArt`, `HeroSquad`). They return **inline SVG strings** that `game.js` rasterizes to `Image` objects via `data:image/svg+xml,...` URIs and draws onto the canvas. PNGs are used for backgrounds and as fallbacks only.
+- `game.js` — the whole game in one file (~1.5 K lines): config/economy → `Meta` (save) → battle engine (`genLevel` deterministic maps, `update`, `aiThink`, pointer input) → canvas rendering → screens → boot. Loaded **last**.
+- `troops-art.js` — procedural SVG portraits (`TroopArt.svg`) for troop cards; towers/units are drawn on the canvas procedurally.
 
-Key `game.js` landmarks (top-of-file config blocks): `LEVELS` / `LEVEL_BG` (10-level campaign + per-level background key), `WEAPONS` + `weaponCost`, `HEROES` + rarity tables, `FORCES` + `sfCost`, and the `Meta` object (persistent progression, the web analog of Godot's `Meta` autoload). The live run lives in `state`; the world scrolls past a fixed-position hero (`state.scroll`).
+Key `game.js` landmarks: `REGIONS`/`UNLOCK_AT`/`INTRO` (campaign + mechanic unlock levels), `TROOPS` + rarity tables, `OPS` (special missions), `LEAGUES`, `Meta`. The live battle lives in `state` (towers/units/routes in a 720×1000 map space mapped through `MAP`). Debug hashes: `#lv<N>`, `#demo<N>`, `#sim` (synchronous autoplay → page title), see `tds-web/README.md`.
 
 ### Cache-busting convention (important)
-Scripts and CSS are loaded with version query strings, e.g. `game.js?v=52`, `style.css?v=49`, art modules `?v=26`. **After editing a JS or CSS file, bump its `?v=` number in `index.html`** — otherwise the browser serves stale cached code and your change won't appear. This is the single most common footgun here.
+Scripts and CSS are loaded with version query strings, e.g. `game.js?v=200`, `style.css?v=100`. **After editing a JS or CSS file, bump its `?v=` number in `index.html`** — otherwise the browser serves stale cached code and your change won't appear. This is the single most common footgun here.
 
 ### Assets
-`tds-web/assets/` is the live asset set the game loads at runtime (`assets/bg/<level>.png` backgrounds, `assets/weapons/<dir>/lv<NN>.png` per-tier weapon art, sprite sheets like `zombie_sheet.png` / `dog_sheet.png` sliced into 8 frames, HUD icons). The `tds-web/README.md` is detailed and current — read it for gameplay rules and per-asset notes.
+`tds-web/assets/` now only holds HUD icons and the play/battle button art; all game art is procedural. `tds-web/README.md` documents gameplay rules, modes and debug hashes.
 
 ## godot-game (Godot 4.6, MCP-driven)
 

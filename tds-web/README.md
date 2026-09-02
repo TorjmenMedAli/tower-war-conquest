@@ -1,99 +1,60 @@
-# Tower Destiny Survive — Web
+# Tower War: Conquest — web build
 
-A standalone browser build (HTML/CSS/JS, no build step, no server needed).
+A swipe-to-conquer tower strategy game in the style of *Tower War – Tactical Conquest*.
+No build step: open `index.html` in a browser (or serve the folder statically). `index.html#play`
+boots straight into the current campaign level.
 
-## Run
-Just open **`index.html`** in any modern browser (Chrome, Edge, Firefox, Safari).
-On a phone, add it to the home screen for a full-screen app feel.
+## How it plays
+- Every **tower** breeds troops (its number = troops inside, max 63; forts 99).
+- **Swipe from one of your towers to any tower within reach** to open a route. Troops stream along
+  it: they reinforce your own towers, fight enemy troops they meet on the road, and subtract from
+  enemy/neutral towers. A tower that drops below 0 is **captured**.
+- A tower has **1 route** below Lv 10, **2** from Lv 10, **3** from Lv 20 (white dots under it).
+  **Swipe across a route to cut it.**
+- Win by capturing every enemy tower. Lose when you have no towers and no troops left.
 
-- `index.html#play` — boot straight into a run (skips the menu).
+### Tower types
+| Type | Breeds | Notes |
+|---|---|---|
+| Barracks | soldiers (1) | the default |
+| Factory | tanks (2 each) | from level 4 |
+| Sniper | — | shoots troops in range · level 11+ |
+| Rocket | — | locks one target, splash damage · level 26+ |
+| Fort | soldiers ×2 rate | huge, holds 99 · level 41+ |
 
-## How to play — advance to the finish
-Every battle costs a **🎫 play ticket** (max 10; +1 refills every 5 minutes, offline time
-counts; a rewarded ad grants +1 any time you're not full — see the pill above PLAY).
+### Obstacles
+Blockades (chop through, costs troops) from level 7 · Land mines from 15 · Rivers (first 5 troops
+build the bridge) from 19 · two enemy armies from 9, three from 33.
 
-The level is a **fight-to-advance** march: the hero holds a fixed screen spot and the world
-scrolls (`state.scroll`) — but **only while the road ahead is clear**. Enemies engaged in
-the front zone stall the convoy (`roadBlocked()`), so how far you get reflects your gear:
-a fresh loadout bogs down around 30–40%, and each upgrade pushes the stall point further.
-Zombies come from the right; raze the mid-level **ENEMY FORT**, then beat the level **BOSS**
-at the finish line to **win** (`levelComplete()` → bonus coins + unlocks the next level).
-If the convoy's **HP** drains to 0 first, it's game over.
+## Modes
+- **Campaign** — 5 regions × 20 levels (100). Maps are deterministic per level.
+- **Special Ops** — 8 fixed missions (multiplier gates, timers, minefields…). One-time gold/gem/bomb
+  reward, replayable for 20% gold.
+- **PvP** — asynchronous duels against a generated bot with troops around your level. ±league
+  points, 6 leagues (Bronze → Champion).
 
-Your defenders auto-fire for free:
-- **2 mounted weapons** that ride with the convoy as escort turrets (whatever you've equipped).
-- **1 hero** leading the advance (the tank drives, foot heroes walk with a leg stride).
-
-In battle you earn **points** from passive **Power** income only (1/s at base — kills pay
-coins, not points; the fort/boss milestones grant burst points) and spend them
-on **special forces** (bottom bar):
-- **RANGER** (10) / **SHERIFF KATE** (14) / **DOC VEGA** (18) — deploy an allied unit that
-  holds a line ahead of the convoy and fires at enemies (has its own HP; max 4 fielded).
-  Each **evolves** into its upgraded hero form at force Lv 6.
-- **AIRSTRIKE** (24) — instant area blast across the whole battlefield.
-
-Win or lose you keep **coins = score × level multiplier** (plus a finish bonus and reward
-chests) to spend on pre-battle upgrades. Levels are tuned so clearing one takes **~20–30
-plays** of earn-and-upgrade. There are **no revives** — when a run ends (win or lose) an
-**interstitial ad** plays before the result card (`playInterstitial()`, the AdMob hook;
-the NO-ADS bundle skips it), then it's back to the garage.
-
-## Pre-battle upgrades (all in the menu)
-- **Castle** (menu) — tap **🏰 CASTLE** to advance its build stage (`CastleArt`); it's the
-  fort you set out from each run, and each stage adds convoy HP. Stored in `Meta.castle`.
-- **Weapons** (nav tab) — **buy** weapons from the 10-gun Arsenal (Pistol → Grenade
-  Launcher), **mount up to 2** (`Meta.weapons`), and **upgrade** each Lv 1 → 20
-  (`Meta.wlv`). Each has a distinct combat profile in the `WEAPONS` array (`game.js`).
-- **Heroes** (nav tab) — equip one hero (`Meta.hero`) and upgrade it. The Battle Tank
-  uses its 7 procedural tiers (`Meta.tankLvl`); other heroes use `Meta.heroLvl`.
-- **Forces** (nav tab) — upgrade the **convoy stats** (HP / Damage / Power) and the
-  **special forces** (`Meta.sfLvl`, Lv 1 → 10; more damage + HP per level).
-
-## Menu sections
-- **Levels** (tap the stage banner) — a 10-level campaign map; level 1 starts unlocked,
-  and clearing your highest level **unlocks and auto-selects the next**. Each node shows
-  your ⚡ Power vs the level's recommended Power so you know when to upgrade. Stuck? A
-  **🎟️ skip ticket** (shop → GEMS) can be spent on the defeat card.
-- **Weapon art** — `weapons-art.js` (`WeaponArt.svg(type, lv)`) procedurally draws each
-  weapon at its upgrade tier as an animated inline SVG. Ported from the Claude Design
-  component *Weapon Upgrade Tiers* — 20 tiers ramp barrels/armor/muzzle and elemental
-  upgrades (fire → electric → ice → poison → plasma → prismatic "Apex Prime"). Used in
-  the weapon cards, the hero badge, and the garage row, swapping per level.
-
-Progress (coins, gems, upgrades) is saved in your browser via `localStorage`.
-
-## Art
-`bg.png` is the city-sunset backdrop. The characters, icons and buttons come from the
-`../extracted/` asset pack (transparent PNGs).
-
-**Sprite sheets** (8 frames laid out horizontally, sliced at runtime in `game.js`):
-- `zombie_sheet.png` — urban-zombie walk cycle.
-- `dog_sheet.png` — robot-dog walk cycle.
-  Enemy sheets face **right** by default, so they are flipped horizontally on draw to
-  face **left** (their direction of travel toward the castle).
-- `scout_sheet.png` — legacy cart cycle (no longer used; kept for its aspect ratio).
-
-> The castle itself is drawn on the canvas in `drawCastle()` (procedural stone walls,
-> gate, tower, battlements, flag), scaling with its build stage. Defenders/allies and
-> weapon turrets are also procedural canvas art.
-
-**Heroes are fully procedural** — `hero-art.js` (`HeroArt.svg(id, prefix, px, fr)`) draws
-each of the 6 western heroes as an inline SVG (distinct hat + palette + weapon), used both
-in the menu (animated) and rasterised onto the battle canvas (idle + shoot frames), same
-technique as `tank-art.js`. No hero PNGs needed; a rarity-tinted token only shows if
-`HeroArt` fails to load.
-
-**HUD assets:**
-- `icon_coins.png`, `icon_gem.png` — chip / upgrade icons.
-- `ab_bomb.png`, `ab_toxic.png`, `ab_frost.png` — ability tiles (cost badges baked in).
-- `btn_play.png`, `btn_battle.png` — menu PLAY / shop BATTLE buttons.
-- `ab_energy.png`, `icon_bolt.png` — extra art (available).
+## Meta
+- **Troops**: 5 soldiers + 5 tanks across 5 rarities. Equip one of each. Upgrade with gold (Lv 1–30);
+  from Lv 15 an upgrade also needs a spare copy. **Summon** (25 gems) rolls a random troop; duplicates
+  become copies.
+- **Air Strike** (💣): consumable, drops an enemy tower to 0. Won from milestones/chests, bought with gems.
+- Battle tickets (10, +1 / 5 min), daily streak, daily quests, shop (daily/ads, chests, items, gold,
+  gems + real IAPs), rating prompts, offline gold, global leaderboard, Play Games / Game Center hooks —
+  all carried over from the previous build.
 
 ## Files
-- `index.html` — markup + screens
-- `style.css` — the glossy "candy" UI (CSS gradients / bevels / shadows)
-- `game.js` — gameplay + Canvas rendering + UI wiring + save/load
-- `hero-art.js` — procedural SVG art for the 6 heroes
-- `tank-art.js` — procedural SVG art for the Battle Tank hero (7 tiers)
-- `castle-art.js` — procedural DOM art for the menu castle showcase
-- `weapons-art.js` — procedural SVG art for the 4 weapons (20 tiers)
+- `index.html` — screens: loading, menu, game HUD, shop, levels (region map), troops, pvp, missions
+  (special ops) + modals.
+- `game.js` — everything: config/economy → `Meta` save → battle engine (`genLevel`, `update`, AI,
+  input) → canvas rendering → screens → boot. Save key: `localStorage['tds_save_web']`
+  (old Zombie Tower Defense saves are migrated: wallet + flags kept, gameplay reset).
+- `troops-art.js` — procedural SVG portraits for troop cards.
+- `style.css` — UI. New Tower War styles are appended at the end.
+- `sfx.js`, `firebase.js`, `cloud.js`, `leaderboard.js`, `native.js`, `iap.js` — platform/services, unchanged.
+
+**Cache-busting**: after editing a JS/CSS file bump its `?v=` in `index.html`.
+
+## Debug hashes
+`#menu` `#shop` `#levels` `#troops` `#pvp` `#ops` · `#lv<N>` start level N · `#dbgwin` / `#dbglose`
+result cards · `#dbgrich` free currency · `#sim` (or `#sim1,5,20@2.5`) runs a synchronous autoplay
+of the listed levels at troop strength 2.5 and writes the results to the page title.
