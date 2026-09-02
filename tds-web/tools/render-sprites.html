@@ -1,0 +1,133 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>render</title>
+<style>html,body{margin:0;background:transparent}#grid{display:grid;grid-template-columns:repeat(8,256px);width:2048px}#grid canvas,#grid img{width:256px;height:256px;display:block}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+</head><body><div id="grid"></div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+window.addEventListener('error', e => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', e => { document.title = 'ERR ' + (e.reason && e.reason.message || e.reason); });
+const SZ = 320;                                            // render size (downscaled ×2 on screenshot for AA)
+const TEAMS = { n: null, p: 215, r: 2, y: 42, v: 275 };     // hue per owner (n = neutral/desaturated)
+const GLB = 'ex/Models/GLB format/';
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setSize(SZ, SZ); renderer.setClearColor(0x000000, 0); renderer.outputColorSpace = THREE.SRGBColorSpace;
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+function setCam(half, cy, low){ cam.left = -half; cam.right = half; cam.top = half; cam.bottom = -half; if (low) cam.position.set(-2.6, 2.4, 4.6); else cam.position.set(3.2, 7.5, 3.2); cam.lookAt(0, cy, 0); cam.updateProjectionMatrix(); }
+const loader = new GLTFLoader();
+const cache = {};
+function load(name){ return cache[name] || (cache[name] = new Promise((res, rej) => loader.load(GLB + name + '.glb', g => res(g.scene), undefined, rej))); }
+// palette variants: hue-shift the orange + purple accent bands to the team hue; neutral = grey accents
+const texCache = {};
+function teamTexture(srcTex, team){
+  const key = team; if (texCache[key]) return texCache[key];
+  const img = srcTex.image, c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+  const g = c.getContext('2d'); g.drawImage(img, 0, 0); const d = g.getImageData(0, 0, c.width, c.height), p = d.data;
+  const hue = TEAMS[team];
+  for (let i = 0; i < p.length; i += 4){
+    const r = p[i] / 255, gg = p[i + 1] / 255, b = p[i + 2] / 255; const mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), l = (mx + mn) / 2; if (mx === mn) continue;
+    const dlt = mx - mn, s = l > .5 ? dlt / (2 - mx - mn) : dlt / (mx + mn); let h; if (mx === r) h = ((gg - b) / dlt + (gg < b ? 6 : 0)) * 60; else if (mx === gg) h = ((b - r) / dlt + 2) * 60; else h = ((r - gg) / dlt + 4) * 60;
+    const accent = (h >= 5 && h <= 45 && s > .5) || (h >= 240 && h <= 290 && s > .4); if (!accent) continue;
+    let nh = hue == null ? 0 : hue, ns = hue == null ? 0.08 : Math.min(1, s * 1.05), nl = hue == null ? l * 0.95 : l;
+    const q = nl < .5 ? nl * (1 + ns) : nl + ns - nl * ns, pp = 2 * nl - q; const hk = nh / 360;
+    const f = t => { t = (t + 1) % 1; return t < 1 / 6 ? pp + (q - pp) * 6 * t : t < .5 ? q : t < 2 / 3 ? pp + (q - pp) * (2 / 3 - t) * 6 : pp; };
+    p[i] = f(hk + 1 / 3) * 255; p[i + 1] = f(hk) * 255; p[i + 2] = f(hk - 1 / 3) * 255;
+  }
+  g.putImageData(d, 0, 0); const t = new THREE.CanvasTexture(c); t.flipY = srcTex.flipY; t.colorSpace = srcTex.colorSpace; t.magFilter = THREE.NearestFilter; t.minFilter = THREE.LinearFilter; return texCache[key] = t;
+}
+function retint(obj, team){ obj.traverse(o => { if (o.isMesh){ const m = o.material.clone(); if (m.map) m.map = teamTexture(m.map, team); m.needsUpdate = true; o.material = m; o.castShadow = o.receiveShadow = true; } }); }
+async function part(name, team){ const src = await load(name); const o = src.clone(true); retint(o, team); return o; }
+function bbox(o){ return new THREE.Box3().setFromObject(o); }
+// stack parts vertically: each part sits on top of the previous
+async function stack(names, team, scale){
+  const g = new THREE.Group(); let y = 0;
+  for (const spec of names){ const [n, sx] = Array.isArray(spec) ? spec : [spec, 1]; const o = await part(n, team); const b = bbox(o); o.position.y = y - b.min.y; if (sx !== 1) o.scale.set(sx, 1, sx); g.add(o); y += (b.max.y - b.min.y) * 0.98; }
+  if (scale) g.scale.setScalar(scale); return g;
+}
+// primitive-built units (same lighting/camera → consistent with the kit)
+const teamCol = t => ({ p: 0x3b8bff, r: 0xff5252, y: 0xffb03b, v: 0xb565ff, n: 0x9aa3ad })[t];
+const mat = (c, extra) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: .75, metalness: .05 }, extra || {}));
+function soldier(team, tier){
+  const g = new THREE.Group(), c = teamCol(team), dark = new THREE.Color(c).multiplyScalar(.7).getHex();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.26, .32, 6, 14), mat(c)); body.position.y = .5; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.22, 16, 12), mat(0xffd7b0)); head.position.y = 1.0; g.add(head);
+  const helmet = new THREE.Mesh(new THREE.SphereGeometry(.245, 16, 10, 0, Math.PI * 2, 0, Math.PI * .42), mat(dark)); helmet.position.y = 1.03; g.add(helmet);
+  for (const sx of [-1, 1]){ const eye = new THREE.Mesh(new THREE.SphereGeometry(.035, 8, 6), mat(0x0a1a38)); eye.position.set(sx * .08, .99, .19); g.add(eye); }
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(.08, .02, .02), mat(0x8a5a40)); mouth.position.set(0, .91, .21); g.add(mouth);
+  if (tier >= 2){ const brim = new THREE.Mesh(new THREE.CylinderGeometry(.3, .3, .05, 16), mat(dark)); brim.position.y = .98; g.add(brim); }
+  if (tier >= 1){ const vest = new THREE.Mesh(new THREE.BoxGeometry(.4, .3, .32), mat(dark)); vest.position.y = .55; g.add(vest); }
+  for (const s of [-1, 1]){ const leg = new THREE.Mesh(new THREE.CylinderGeometry(.09, .1, .3, 10), mat(dark)); leg.position.set(s * .12, .15, 0); g.add(leg); const boot = new THREE.Mesh(new THREE.BoxGeometry(.18, .1, .26), mat(0x2c333d)); boot.position.set(s * .12, .05, .03); g.add(boot); }
+  const gun = new THREE.Mesh(new THREE.BoxGeometry(.08, .08, .7 + tier * .08), mat(0x2c333d)); gun.position.set(.3, .55, .2); g.add(gun);
+  if (tier >= 3){ const pack = new THREE.Mesh(new THREE.BoxGeometry(.3, .32, .16), mat(0x5a4a30)); pack.position.set(0, .6, -.26); g.add(pack); }
+  if (tier >= 4){ const cape = new THREE.Mesh(new THREE.BoxGeometry(.42, .6, .06), mat(0xffd24a)); cape.position.set(0, .45, -.22); g.add(cape); const plume = new THREE.Mesh(new THREE.ConeGeometry(.08, .3, 8), mat(0xffd24a)); plume.position.y = 1.3; g.add(plume); }
+  g.rotation.y = Math.PI; g.scale.setScalar(1.15); return g;
+}
+function tank(team, tier){
+  const g = new THREE.Group(), c = teamCol(team), dark = new THREE.Color(c).multiplyScalar(.7).getHex();
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(1.2, .38, 1.7), mat(c)); hull.position.y = .42; g.add(hull);
+  for (const s of [-1, 1]){ const tr = new THREE.Mesh(new THREE.BoxGeometry(.32, .36, 1.85), mat(0x2c333d)); tr.position.set(s * .62, .28, 0); g.add(tr); for (let k = -2; k <= 2; k++){ const w = new THREE.Mesh(new THREE.CylinderGeometry(.16, .16, .34, 12), mat(0x454e5c)); w.rotation.z = Math.PI / 2; w.position.set(s * .62, .26, k * .4); g.add(w); } }
+  const tur = new THREE.Mesh(new THREE.CylinderGeometry(.42, .5, .34, 18), mat(dark)); tur.position.y = .78; g.add(tur);
+  const barrels = tier >= 3 ? [-.12, .12] : [0];
+  for (const bx of barrels){ const b = new THREE.Mesh(new THREE.CylinderGeometry(.07, .08, 1.1 + tier * .1, 10), mat(0x2c333d)); b.rotation.x = Math.PI / 2; b.position.set(bx, .82, .85); g.add(b); }
+  if (tier >= 1){ const plate = new THREE.Mesh(new THREE.BoxGeometry(1.3, .12, .5), mat(dark)); plate.position.set(0, .64, .55); g.add(plate); }
+  if (tier >= 2){ const ant = new THREE.Mesh(new THREE.CylinderGeometry(.02, .02, .6, 6), mat(0x2c333d)); ant.position.set(-.3, 1.2, -.3); g.add(ant); }
+  if (tier >= 4){ for (const s of [-1, 1]){ const sp = new THREE.Mesh(new THREE.ConeGeometry(.12, .4, 8), mat(0xffd24a)); sp.rotation.x = Math.PI / 2; sp.position.set(s * .4, .45, 1.05); g.add(sp); } }
+  g.scale.setScalar(.72); return g;
+}
+function mine(){ const g = new THREE.Group(); const b = new THREE.Mesh(new THREE.SphereGeometry(.5, 20, 14, 0, Math.PI * 2, 0, Math.PI / 2), mat(0x2c333d)); g.add(b); for (let i = 0; i < 6; i++){ const a = i * Math.PI / 3; const s = new THREE.Mesh(new THREE.CylinderGeometry(.05, .08, .3, 6), mat(0x454e5c)); s.position.set(Math.cos(a) * .5, .2, Math.sin(a) * .5); s.rotation.z = -Math.cos(a) * 1.2; s.rotation.x = Math.sin(a) * 1.2; g.add(s); } const light = new THREE.Mesh(new THREE.SphereGeometry(.12, 10, 8), mat(0xff3b3b, { emissive: 0xff2020, emissiveIntensity: .9 })); light.position.y = .5; g.add(light); return g; }
+function gate(){ const g = new THREE.Group(); const ring = new THREE.Mesh(new THREE.TorusGeometry(.9, .09, 10, 40), mat(0xffd24a, { emissive: 0xffb000, emissiveIntensity: .5 })); ring.rotation.x = Math.PI / 2; ring.position.y = .06; g.add(ring); for (const s of [-1, 1]){ const post = new THREE.Mesh(new THREE.CylinderGeometry(.09, .12, .9, 10), mat(0xffd24a)); post.position.set(s * .9, .45, 0); g.add(post); } return g; }
+
+const SPRITES = [];
+const towerSpecs = {
+  barracks1: ['tower-round-bottom-a', 'tower-round-roof-a'],
+  barracks2: ['tower-round-bottom-a', 'tower-round-middle-a', 'tower-round-roof-b'],
+  barracks3: ['tower-round-bottom-b', 'tower-round-middle-b', 'tower-round-roof-c'],
+  factory1:  ['tower-square-bottom-b', 'tower-square-roof-a'],
+  factory2:  ['tower-square-bottom-b', 'tower-square-middle-b', 'tower-square-roof-b'],
+  factory3:  ['tower-square-bottom-c', 'tower-square-middle-a', 'tower-square-top-c', 'weapon-turret'],
+  sniper1:   ['tower-round-bottom-c', 'tower-round-middle-c', 'tower-round-top-a', 'weapon-ballista'],
+  sniper2:   ['tower-round-bottom-c', 'tower-round-middle-c', 'tower-round-top-b', 'weapon-ballista'],
+  sniper3:   ['tower-round-bottom-c', 'tower-round-middle-c', 'tower-round-middle-c', 'tower-round-top-c', 'weapon-ballista'],
+  rocket1:   ['tower-square-bottom-c', 'tower-square-top-b', 'weapon-cannon'],
+  rocket2:   ['tower-square-bottom-c', 'tower-square-middle-c', 'tower-square-top-b', 'weapon-cannon'],
+  rocket3:   ['tower-square-bottom-c', 'tower-square-middle-c', 'tower-square-top-a', 'weapon-catapult'],
+  fort1:     [['tower-square-middle-c', 1.9], 'tower-round-build-e'],
+  fort2:     [['tower-square-middle-c', 1.9], 'tower-round-bottom-b', 'tower-round-middle-b', 'tower-round-roof-c'],
+  fort3:     [['tower-square-bottom-a', 2.0], ['tower-square-middle-c', 1.9], 'tower-round-bottom-b', 'tower-round-top-c', 'tower-round-roof-b'],
+};
+for (const team of ['n', 'p', 'r', 'y', 'v']) for (const k in towerSpecs) SPRITES.push({ name: `tower_${k}_${team}`, build: () => stack(towerSpecs[k], team, k.startsWith('fort') ? 0.9 : 1), half: k.startsWith('fort') ? 2.6 : 1.75, cy: k.startsWith('fort') ? 0.85 : 0.95 });
+for (const team of ['p', 'r', 'y', 'v']) for (let t = 0; t < 5; t++){ SPRITES.push({ name: `soldier${t}_${team}`, build: () => soldier(team, t), half: 1.1, cy: .6 }); SPRITES.push({ name: `tank${t}_${team}`, build: () => tank(team, t), half: 1.15, cy: .45 }); }
+for (const team of ['p', 'r']) for (let t = 0; t < 5; t++){ SPRITES.push({ name: `port_soldier${t}_${team}`, build: () => { const g = soldier(team, t); g.rotation.y = -Math.PI * 0.35; return g; }, half: 1.0, cy: .72, low: true }); SPRITES.push({ name: `port_tank${t}_${team}`, build: () => { const g = tank(team, t); g.rotation.y = Math.PI * 0.3; return g; }, half: 1.05, cy: .5, low: true }); }
+SPRITES.push({ name: 'wall', build: () => stack(['wood-structure-high'], 'n'), half: 1.6, cy: .5 });
+SPRITES.push({ name: 'wall_broken', build: () => stack(['wood-structure-part'], 'n'), half: 1.6, cy: .5 });
+SPRITES.push({ name: 'bridge', build: () => stack([['wood-structure', 1]], 'n'), half: 1.6, cy: .3 });
+SPRITES.push({ name: 'mine', build: () => mine(), half: 1.0, cy: .2 });
+SPRITES.push({ name: 'gate', build: () => gate(), half: 1.4, cy: .3 });
+SPRITES.push({ name: 'rocks', build: () => stack(['detail-rocks-large'], 'n'), half: 1.6, cy: .3 });
+SPRITES.push({ name: 'tree', build: () => stack(['detail-tree-large'], 'n'), half: 1.8, cy: .8 });
+SPRITES.push({ name: 'crystal', build: () => stack(['detail-crystal-large'], 'p'), half: 1.6, cy: .5 });
+SPRITES.push({ name: 'flag', build: () => stack(['selection-b'], 'y'), half: 1.4, cy: .1 });
+
+(async () => {
+  const cols = 8, rows = Math.ceil(SPRITES.length / cols);
+  const big = document.createElement('canvas'); big.width = cols * 256; big.height = rows * 256; big.style.width = big.width + 'px'; document.body.appendChild(big); const bg = big.getContext('2d');
+  document.getElementById('grid').remove();
+  const names = [];
+  const qs = new URLSearchParams(location.search); const from = +qs.get('from') || 0, to = Math.min(SPRITES.length, +qs.get('to') || SPRITES.length);
+  const only = qs.get('only') ? new Set(qs.get('only').split(',')) : null;
+  for (let i = from; i < to; i++){
+    if (only && !only.has(SPRITES[i].name)) continue;
+    const sp = SPRITES[i]; const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x667788, .75));
+    const sun = new THREE.DirectionalLight(0xffffff, 1.0); sun.position.set(3, 8, 2); scene.add(sun);
+    const fill = new THREE.DirectionalLight(0xbfd8ff, .3); fill.position.set(-4, 3, -2); scene.add(fill);
+    const obj = await sp.build(); scene.add(obj);
+    const b = bbox(obj), sz = new THREE.Vector3(); b.getSize(sz);
+    const half = sp.half || Math.max(1.2, Math.min(3.4, Math.max(sz.x, sz.z, sz.y * 0.8) * 0.62));
+    setCam(half, sp.cy != null ? sp.cy : (b.min.y + sz.y * 0.42), sp.low); renderer.render(scene, cam);
+    bg.drawImage(renderer.domElement, (i % cols) * 256, Math.floor(i / cols) * 256, 256, 256); names.push(sp.name);
+    await fetch('/save?name=' + sp.name, { method: 'POST', body: renderer.domElement.toDataURL('image/png') }); document.title = 'AT ' + i;
+  }
+  window.__names = names; document.title = 'DONE ' + names.join(',');
+})();
+</script></body></html>

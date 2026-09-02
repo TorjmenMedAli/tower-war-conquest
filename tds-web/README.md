@@ -58,3 +58,14 @@ build the bridge) from 19 · two enemy armies from 9, three from 33.
 `#menu` `#shop` `#levels` `#troops` `#pvp` `#ops` · `#lv<N>` start level N · `#dbgwin` / `#dbglose`
 result cards · `#dbgrich` free currency · `#sim` (or `#sim1,5,20@2.5`) runs a synchronous autoplay
 of the listed levels at troop strength 2.5 and writes the results to the page title.
+
+## Art pipeline (sprites)
+`assets/sprites/*.png` are pre-rendered 3D sprites: towers/walls/bridges/scenery come from Kenney's
+**Tower Defense Kit** (CC0, see `assets/sprites/LICENSE-kenney.txt`) with the palette accents hue-shifted
+per team (`_n` neutral, `_p` blue player, `_r` red, `_y` yellow, `_v` purple); soldiers and tanks are built
+from primitives in the same scene so lighting matches. Towers have 3 visual tiers (Lv 1 / 10 / 20), five
+rarity tiers for troops, plus `port_*` low-angle portraits for the cards.
+To re-render: put the kit's `Models/GLB format` folder next to `tools/render-sprites.html`, run
+`python3 tools/render-server.py` (serves + saves POSTed PNGs into `sprites/`) and open
+`http://127.0.0.1:8766/render-sprites.html?from=0&to=30` (chunked; `?only=name,name` for a subset), then
+downscale the PNGs to 256 px into `assets/sprites/`.

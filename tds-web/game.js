@@ -228,6 +228,14 @@ function show(name){
 /* ---------------- Canvas ---------------- */
 const cv = $('cv'), ctx = cv.getContext('2d');
 let W = 0, H = 0, DPR = 1;
+const IMG = {};                                            // sprite cache (assets/sprites/*.png, rendered from Kenney's Tower Defense Kit)
+const OWNER_KEY = ['n', 'p', 'r', 'y', 'v'];
+function spriteList(){ const l = [];
+  for (const o of OWNER_KEY) for (const k of ['barracks','factory','sniper','rocket','fort']) for (let t = 1; t <= 3; t++) l.push(`tower_${k}${t}_${o}`);
+  for (const o of OWNER_KEY.slice(1)) for (let t = 0; t < 5; t++){ l.push(`soldier${t}_${o}`); l.push(`tank${t}_${o}`); }
+  return l.concat(['wall','wall_broken','bridge','mine','gate','rocks','tree','crystal','flag']); }
+function preload(cb){ const list = spriteList(); let n = list.length; for (const k of list){ const im = new Image(); IMG[k] = im; im.onload = im.onerror = () => { if (--n === 0) cb(); }; im.src = 'assets/sprites/' + k + '.png'; } }
+const spr = k => { const im = IMG[k]; return im && im.naturalWidth ? im : null; };
 function resize(){
   const app = $('app'); DPR = Math.min(2, window.devicePixelRatio || 1);
   W = app.clientWidth; H = app.clientHeight;
@@ -645,6 +653,8 @@ function drawGround(){
   ctx.fillStyle = R.ground2;
   const rnd = mulberry(state.level * 31 + 7);
   for (let i = 0; i < 26; i++){ const p = toScr(rnd() * MW, rnd() * MH); ctx.beginPath(); ctx.ellipse(p.x, p.y, (30 + rnd() * 70) * s, (18 + rnd() * 40) * s, rnd() * 3, 0, 6.283); ctx.fill(); }
+  // scenery (kept away from towers)
+  { const dec = decor(); for (const d of dec){ const im = spr(d.k); if (!im) continue; const q = toScr(d.x, d.y), sz = d.sz * s; ctx.drawImage(im, q.x - sz / 2, q.y - sz * 0.6, sz, sz); } }
   // map frame
   ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 3; rr(MAP.x, MAP.y, MW * s, MH * s, 22 * s); ctx.stroke();
   // river
@@ -653,6 +663,14 @@ function drawGround(){
     ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2 * s;
     for (let k = 0; k < 6; k++){ const yy = a.y + (b.y - a.y) * (0.2 + k * 0.13); ctx.beginPath(); for (let x = 0; x <= MW; x += 24){ const p = toScr(x, 0); ctx.lineTo(p.x, yy + Math.sin(x / 40 + state.t * 2 + k) * 2 * s); } ctx.stroke(); }
   }
+}
+let _decor = null, _decorKey = '';
+function decor(){
+  const key = state.level + ':' + state.towers.length; if (_decorKey === key) return _decor; _decorKey = key; _decor = [];
+  const rnd = mulberry(state.level * 977 + 5); const R = state.region || REGIONS[0]; const kinds = R.id === 3 ? ['tree','rocks','crystal'] : R.id === 4 ? ['rocks','rocks','crystal'] : R.id === 5 ? ['rocks','crystal'] : ['tree','tree','rocks'];
+  let tries = 0; while (_decor.length < 10 && tries++ < 200){ const x = 30 + rnd() * (MW - 60), y = 40 + rnd() * (MH - 80);
+    if (state.towers.every(t => Math.hypot(t.x - x, t.y - y) > 120) && state.walls.every(w => Math.hypot(w.x - x, w.y - y) > 70) && state.mines.every(m => Math.hypot(m.x - x, m.y - y) > 50) && state.gates.every(g => Math.hypot(g.x - x, g.y - y) > 70) && (!state.river || Math.abs(y - state.river.y) > 60)) _decor.push({ x, y, k: kinds[Math.floor(rnd() * kinds.length)], sz: 120 + rnd() * 70 }); }
+  return _decor;
 }
 function drawRoutes(){
   const s = MAP.s;
@@ -675,6 +693,7 @@ function drawRoutes(){
     const pA = toScr(a.x + (b.x - a.x) * tA, lo), pB = toScr(a.x + (b.x - a.x) * tB, hi);
     ctx.strokeStyle = done ? '#a8651f' : 'rgba(168,101,31,.45)'; ctx.lineWidth = 16 * s; ctx.lineCap = 'butt'; ctx.beginPath(); ctx.moveTo(pA.x, pA.y); ctx.lineTo(pB.x, pB.y); ctx.stroke();
     ctx.strokeStyle = done ? '#e0a83f' : 'rgba(224,168,63,.5)'; ctx.lineWidth = 2 * s; ctx.setLineDash([4 * s, 5 * s]); ctx.beginPath(); ctx.moveTo(pA.x, pA.y); ctx.lineTo(pB.x, pB.y); ctx.stroke(); ctx.setLineDash([]);
+    if (done){ const im = spr('bridge'); if (im){ const m = { x: (pA.x + pB.x) / 2, y: (pA.y + pB.y) / 2 }, sz = 90 * s; ctx.drawImage(im, m.x - sz / 2, m.y - sz * 0.55, sz, sz); } }
     if (!done){ const m = { x: (pA.x + pB.x) / 2, y: (pA.y + pB.y) / 2 }; ctx.fillStyle = '#fff'; ctx.font = `700 ${13 * s}px Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.fillText(`🔨 ${n}/${BRIDGE_N}`, m.x, m.y + 5 * s); }
   }
   // drag preview
@@ -690,80 +709,49 @@ function drawObstacles(){
   const s = MAP.s;
   for (const w of state.walls){ if (w.hp <= 0) continue; const p = toScr(w.x, w.y);
     ctx.save(); ctx.translate(p.x, p.y);
-    ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(0, 14 * s, 30 * s, 8 * s, 0, 0, 6.283); ctx.fill();
-    for (let k = 0; k < 3; k++){ ctx.fillStyle = k % 2 ? '#a8651f' : '#c98a2f'; ctx.strokeStyle = '#4a2a10'; ctx.lineWidth = 2 * s; rr(-30 * s, (-4 - k * 9) * s, 60 * s, 9 * s, 4 * s); ctx.fill(); ctx.stroke(); }
-    ctx.fillStyle = '#fff'; ctx.font = `700 ${12 * s}px Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 3 * s; ctx.strokeText(Math.ceil(w.hp), 0, -30 * s); ctx.fillText(Math.ceil(w.hp), 0, -30 * s);
+    ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(0, 10 * s, 34 * s, 12 * s, 0, 0, 6.283); ctx.fill();
+    const im = spr(w.hp <= w.max / 2 ? 'wall_broken' : 'wall'); if (im){ const sz = 200 * s; ctx.drawImage(im, -sz / 2, -sz * 0.62, sz, sz); }
+    ctx.fillStyle = '#fff'; ctx.font = `700 ${12 * s}px Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 3 * s; ctx.strokeText(Math.ceil(w.hp), 0, -34 * s); ctx.fillText(Math.ceil(w.hp), 0, -34 * s);
     ctx.restore(); }
-  for (const m of state.mines){ if (!m.alive) continue; const p = toScr(m.x, m.y);
-    ctx.fillStyle = '#2c333d'; ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 2 * s; ctx.beginPath(); ctx.arc(p.x, p.y, 12 * s, 0, 6.283); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = (Math.sin(state.t * 8) > 0) ? '#ff3b3b' : '#7a1a1a'; ctx.beginPath(); ctx.arc(p.x, p.y, 4 * s, 0, 6.283); ctx.fill();
-    for (let k = 0; k < 6; k++){ const a = k * 1.047; ctx.strokeStyle = '#2c333d'; ctx.lineWidth = 3 * s; ctx.beginPath(); ctx.moveTo(p.x + Math.cos(a) * 12 * s, p.y + Math.sin(a) * 12 * s); ctx.lineTo(p.x + Math.cos(a) * 17 * s, p.y + Math.sin(a) * 17 * s); ctx.stroke(); } }
-  for (const g of state.gates){ const p = toScr(g.x, g.y);
-    ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 4 * s; ctx.setLineDash([]); rr(p.x - 30 * s, p.y - 30 * s, 60 * s, 60 * s, 12 * s); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,210,74,.18)'; ctx.fill();
+  for (const m of state.mines){ if (!m.alive) continue; const p = toScr(m.x, m.y); const im = spr('mine'); const sz = 48 * s;
+    if (im) ctx.drawImage(im, p.x - sz / 2, p.y - sz * 0.6, sz, sz);
+    if (Math.sin(state.t * 8) > 0){ ctx.fillStyle = '#ff3b3b'; ctx.beginPath(); ctx.arc(p.x, p.y - 10 * s, 3.5 * s, 0, 6.283); ctx.fill(); } }
+  for (const g of state.gates){ const p = toScr(g.x, g.y); const im = spr('gate'); const sz = 110 * s;
+    if (im) ctx.drawImage(im, p.x - sz / 2, p.y - sz * 0.55, sz, sz);
     ctx.fillStyle = '#fff'; ctx.font = `800 ${22 * s}px Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 4 * s; ctx.strokeText(g.label, p.x, p.y + 8 * s); ctx.fillText(g.label, p.x, p.y + 8 * s); }
 }
+const towerTier = t => t.lv >= 20 ? 3 : t.lv >= 10 ? 2 : 1;
+const troopTier = owner => { if (owner !== 1) return Math.min(4, Math.floor(state.level / 25)); return 0; };
 function drawTowerArt(t, p, s){
-  const col = OWNER_COL[t.owner], dark = OWNER_DARK[t.owner], R = TOWER_R[t.type] * s;
+  const col = OWNER_COL[t.owner], R = TOWER_R[t.type] * s, fort = t.type === 'fort';
   ctx.save(); ctx.translate(p.x, p.y);
-  // shadow + base disc
-  ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); ctx.ellipse(0, R * 0.55, R * 1.05, R * 0.5, 0, 0, 6.283); ctx.fill();
-  ctx.fillStyle = t.owner ? col : '#b8c0c8'; ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 3 * s; ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.283); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,.22)'; ctx.beginPath(); ctx.arc(0, -R * 0.25, R * 0.75, 0, 6.283); ctx.fill();
-  if (t.flash > 0){ ctx.fillStyle = `rgba(255,255,255,${Math.min(0.8, t.flash)})`; ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.283); ctx.fill(); }
-  const k = R / 34;
-  ctx.lineWidth = 2.4 * s;
-  if (t.type === 'barracks'){                             // tent-style barracks
-    ctx.fillStyle = dark; ctx.strokeStyle = '#0a1a38'; ctx.beginPath(); ctx.moveTo(-18 * k, 6 * k); ctx.lineTo(0, -20 * k); ctx.lineTo(18 * k, 6 * k); ctx.closePath(); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#ffd7b0'; ctx.beginPath(); ctx.moveTo(-6 * k, 6 * k); ctx.lineTo(0, -6 * k); ctx.lineTo(6 * k, 6 * k); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -20 * k); ctx.lineTo(0, -30 * k); ctx.lineTo(10 * k, -26 * k); ctx.lineTo(0, -22 * k); ctx.closePath(); ctx.fill();
-  } else if (t.type === 'factory'){                         // hangar + chimney + gear
-    ctx.fillStyle = dark; ctx.strokeStyle = '#0a1a38'; rr(-20 * k, -8 * k, 40 * k, 20 * k, 4 * k); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#5a6473'; rr(8 * k, -26 * k, 8 * k, 20 * k, 2 * k); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = 'rgba(255,255,255,.55)'; ctx.beginPath(); ctx.arc(12 * k + Math.sin(state.t * 3) * 3 * k, -32 * k - (state.t * 20 % 12) * k, 5 * k, 0, 6.283); ctx.fill();
-    ctx.fillStyle = '#ffd24a'; ctx.beginPath(); for (let i = 0; i < 8; i++){ const a = i * 0.785, r1 = 7 * k, r2 = 10 * k; ctx.lineTo(-8 * k + Math.cos(a) * r2, 2 * k + Math.sin(a) * r2); ctx.lineTo(-8 * k + Math.cos(a + 0.39) * r1, 2 * k + Math.sin(a + 0.39) * r1); } ctx.closePath(); ctx.fill(); ctx.stroke();
-  } else if (t.type === 'sniper'){                          // tall watchtower + scope
-    ctx.fillStyle = '#5a4a30'; ctx.strokeStyle = '#0a1a38'; rr(-8 * k, -30 * k, 16 * k, 38 * k, 3 * k); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = dark; rr(-15 * k, -36 * k, 30 * k, 12 * k, 3 * k); ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = '#2c333d'; ctx.lineWidth = 4 * s; ctx.beginPath(); ctx.moveTo(4 * k, -30 * k); ctx.lineTo(26 * k, -40 * k); ctx.stroke();
-    if (t.owner){ ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 6]); ctx.beginPath(); ctx.arc(0, 0, Math.min(280, 130 + t.lv * 4) * s, 0, 6.283); ctx.stroke(); ctx.setLineDash([]); }
-  } else if (t.type === 'rocket'){                          // launcher pods
-    ctx.fillStyle = dark; ctx.strokeStyle = '#0a1a38'; rr(-18 * k, -4 * k, 36 * k, 16 * k, 4 * k); ctx.fill(); ctx.stroke();
-    ctx.save(); ctx.rotate(-0.5); for (let i = -1; i <= 1; i++){ ctx.fillStyle = '#2c333d'; rr(-6 * k + i * 9 * k, -30 * k, 7 * k, 30 * k, 3 * k); ctx.fill(); ctx.stroke(); ctx.fillStyle = '#ff5a4d'; ctx.beginPath(); ctx.arc(-2.5 * k + i * 9 * k, -30 * k, 3.5 * k, 0, 6.283); ctx.fill(); } ctx.restore();
-  } else if (t.type === 'fort'){                            // big castle with flags
-    ctx.fillStyle = dark; ctx.strokeStyle = '#0a1a38'; rr(-34 * k, -14 * k, 68 * k, 30 * k, 5 * k); ctx.fill(); ctx.stroke();
-    for (const x of [-30, -12, 6, 24]){ ctx.fillStyle = dark; rr(x * k, -22 * k, 8 * k, 10 * k, 1.5 * k); ctx.fill(); ctx.stroke(); }
-    ctx.fillStyle = '#5a6473'; rr(-10 * k, -34 * k, 20 * k, 26 * k, 3 * k); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(0, -34 * k); ctx.lineTo(0, -46 * k); ctx.lineTo(12 * k, -41 * k); ctx.lineTo(0, -36 * k); ctx.closePath(); ctx.fill();
-    ctx.fillStyle = '#0a1a38'; rr(-5 * k, -2 * k, 10 * k, 16 * k, 4 * k); ctx.fill();
-    if (t.owner && Math.floor(state.t * 2) % 3 === 0){ ctx.fillStyle = 'rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(20 * k, -52 * k + (state.t * 40 % 30) * k, 8 * k, Math.PI, 0); ctx.fill(); }
-  }
-  // level number
-  const lv = Math.max(0, Math.floor(t.lv + 1e-6));
-  ctx.font = `800 ${(t.type === 'fort' ? 26 : 20) * s}px "Baloo 2", Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.lineWidth = 5 * s; ctx.strokeStyle = '#0a1a38'; ctx.strokeText(lv, 0, R * 0.62); ctx.fillStyle = '#fff'; ctx.fillText(lv, 0, R * 0.62);
-  ctx.textBaseline = 'alphabetic';
-  // route slot dots (white = free, hollow = in use)
-  if (t.owner && BREEDS[t.type]){ const n = maxRoutes(t.lv), used = t.routes.length; for (let i = 0; i < n; i++){ const x = (i - (n - 1) / 2) * 11 * s; ctx.beginPath(); ctx.arc(x, R + 10 * s, 4 * s, 0, 6.283); ctx.fillStyle = i < n - used ? '#fff' : 'rgba(255,255,255,.3)'; ctx.fill(); ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 1.5 * s; ctx.stroke(); } }
+  // ground pad: team-coloured disc + shadow (also the tap target)
+  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(0, R * 0.42, R * 1.02, R * 0.62, 0, 0, 6.283); ctx.fill();
+  ctx.fillStyle = t.owner ? col : '#b8c0c8'; ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.ellipse(0, R * 0.36, R * 0.98, R * 0.58, 0, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1;
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2 * s; ctx.stroke();
+  const im = spr(`tower_${t.type}${towerTier(t)}_${OWNER_KEY[t.owner]}`);
+  if (im){ const w = (fort ? 330 : 230) * s; ctx.drawImage(im, -w / 2, -w * 0.58, w, w); }
+  else { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.283); ctx.fill(); }
+  if (t.flash > 0){ ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,255,255,${Math.min(0.6, t.flash)})`; ctx.beginPath(); ctx.ellipse(0, -R * 0.2, R * 0.9, R * 1.1, 0, 0, 6.283); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; }
+  if (t.owner && t.type === 'sniper'){ ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 6]); ctx.beginPath(); ctx.arc(0, 0, Math.min(280, 130 + t.lv * 4) * s, 0, 6.283); ctx.stroke(); ctx.setLineDash([]); }
+  // level badge
+  const lv = Math.max(0, Math.floor(t.lv + 1e-6)); const by = R * 0.72, bw = (lv >= 10 ? 40 : 30) * s, bh = 24 * s;
+  ctx.fillStyle = t.owner ? OWNER_DARK[t.owner] : '#6b7480'; rr(-bw / 2, by - bh / 2, bw, bh, bh / 2); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * s; ctx.stroke();
+  ctx.font = `800 ${16 * s}px "Baloo 2", Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText(lv, 0, by + 1 * s); ctx.textBaseline = 'alphabetic';
+  // route slots (white = free, hollow = in use)
+  if (t.owner && BREEDS[t.type]){ const n = maxRoutes(t.lv), used = t.routes.length; for (let i = 0; i < n; i++){ const x = (i - (n - 1) / 2) * 11 * s; ctx.beginPath(); ctx.arc(x, by + 20 * s, 4 * s, 0, 6.283); ctx.fillStyle = i < n - used ? '#fff' : 'rgba(255,255,255,.3)'; ctx.fill(); ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 1.5 * s; ctx.stroke(); } }
   ctx.restore();
 }
+const SPRITE_FWD = { tank: 3 * Math.PI / 4, soldier: -Math.PI / 4 };   // rendered facing: tanks +z (down-left), soldiers −z (up-right)
 function drawUnit(u, s){
-  const p = toScr(u.x, u.y), col = OWNER_COL[u.owner], dark = OWNER_DARK[u.owner];
-  const a = state.towers[u.from], b = state.towers[u.to]; const dirx = Math.sign(b.x - a.x) || 1;
+  const p = toScr(u.x, u.y), a = state.towers[u.from], b = state.towers[u.to];
+  const ang = Math.atan2(b.y - a.y, b.x - a.x);
+  let tier = u.owner === 1 ? troopById(u.tank ? Meta.tank : Meta.soldier).tier : troopTier(u.owner);
+  const im = spr(`${u.tank ? 'tank' : 'soldier'}${tier}_${OWNER_KEY[u.owner]}`);
   ctx.save(); ctx.translate(p.x, p.y);
-  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(0, 7 * s, 8 * s, 3 * s, 0, 0, 6.283); ctx.fill();
-  if (u.tank){
-    ctx.fillStyle = '#2c333d'; ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 1.5 * s; rr(-11 * s, -2 * s, 22 * s, 9 * s, 3 * s); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = col; rr(-9 * s, -8 * s, 18 * s, 8 * s, 3 * s); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = dark; rr(-4 * s, -13 * s, 9 * s, 7 * s, 2 * s); ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 2.5 * s; ctx.beginPath(); ctx.moveTo(dirx * 3 * s, -10 * s); ctx.lineTo(dirx * 14 * s, -11 * s); ctx.stroke();
-  } else {
-    const bob = Math.sin(state.t * 14 + u.off) * 1.2 * s;
-    ctx.fillStyle = col; ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 1.5 * s; rr(-5 * s, -6 * s + bob, 10 * s, 11 * s, 4 * s); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#ffd7b0'; ctx.beginPath(); ctx.arc(0, -10 * s + bob, 5 * s, 0, 6.283); ctx.fill(); ctx.stroke();
-    ctx.fillStyle = dark; ctx.beginPath(); ctx.arc(0, -11.5 * s + bob, 5.2 * s, Math.PI, 0); ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = '#2c333d'; ctx.lineWidth = 2 * s; ctx.beginPath(); ctx.moveTo(dirx * 2 * s, -2 * s + bob); ctx.lineTo(dirx * 10 * s, -4 * s + bob); ctx.stroke();
-  }
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(0, 4 * s, (u.tank ? 13 : 8) * s, (u.tank ? 7 : 4) * s, 0, 0, 6.283); ctx.fill();
+  if (im){ ctx.rotate(ang - SPRITE_FWD[u.tank ? 'tank' : 'soldier']); const w = (u.tank ? 62 : 44) * s; ctx.drawImage(im, -w / 2, -w / 2 - 4 * s, w, w); }
+  else { ctx.fillStyle = OWNER_COL[u.owner]; ctx.beginPath(); ctx.arc(0, 0, 6 * s, 0, 6.283); ctx.fill(); }
   ctx.restore();
 }
 function drawFx(s){
@@ -1475,7 +1463,7 @@ function boot(){
   const ld = $('loading'), lf = $('ldFill'), lt = $('ldTxt'); let p = 0;
   const msgs = ['Deploying troops…', 'Building barracks…', 'Scouting the map…', 'Ready, Commander!'];
   const iv = setInterval(() => { p = Math.min(100, p + 9 + Math.random() * 14); if (lf) lf.style.width = p + '%'; if (lt) lt.textContent = msgs[Math.min(3, Math.floor(p / 26))];
-    if (p >= 100){ clearInterval(iv); setTimeout(() => { if (ld) ld.classList.add('gone'); start(); }, 250); } }, 110);
+    if (p >= 100){ clearInterval(iv); preload(() => setTimeout(() => { if (ld) ld.classList.add('gone'); start(); }, 250)); } }, 110);
 }
 function start(){
   show('menu'); trkProfile();

@@ -64,7 +64,10 @@ window.TroopArt = (() => {
       <text x="60" y="14" text-anchor="middle" font-size="11" fill="${acc}" font-family="Fredoka,sans-serif" font-weight="700">${stars}</text>
     </svg>`;
   }
+  const TEAM_KEY = { '#3b8bff': 'p', '#ff5252': 'r', '#ffb03b': 'y', '#b565ff': 'v' };
   return {
-    svg(t, team){ return t.kind === 'tank' ? tank(t, team) : soldier(t, team); },
+    // rendered 3D sprite (assets/sprites) with the procedural SVG as fallback while it loads
+    svg(t, team){ const k = TEAM_KEY[team] || 'p'; return `<img class="troop-img" src="assets/sprites/port_${t.kind === 'tank' ? 'tank' : 'soldier'}${t.tier | 0}_${k === 'r' ? 'r' : 'p'}.png" alt="${t.name}">`; },
+    procedural(t, team){ return t.kind === 'tank' ? tank(t, team) : soldier(t, team); },
   };
 })();
