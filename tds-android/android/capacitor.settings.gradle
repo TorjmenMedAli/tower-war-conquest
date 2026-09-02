@@ -24,7 +24,7 @@ include ':capacitor-preferences'
 project(':capacitor-preferences').projectDir = new File('../node_modules/@capacitor/preferences/android')
 
 include ':capacitor-google-game-services'
-project(':capacitor-google-game-services').projectDir = new File('../node_modules/capacitor-google-game-services/android')
+project(':capacitor-google-game-services').projectDir = new File('../local-plugins/capacitor-google-game-services/android')
 
 include ':capacitor-play-games-services'
 project(':capacitor-play-games-services').projectDir = new File('../node_modules/capacitor-play-games-services/android')

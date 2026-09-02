@@ -10,11 +10,10 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
-        <!-- AdMob APPLICATION id — this is Google's public TEST app id.
-             TODO: replace with YOUR AdMob app id (ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY) -->
+        <!-- AdMob APPLICATION id (real, from the AdMob console — unit ids come from Remote Config) -->
         <meta-data
             android:name="com.google.android.gms.ads.APPLICATION_ID"
-            android:value="ca-app-pub-3940256099942544~3347511713" />
+            android:value="ca-app-pub-0164886809182937~8358129446" />
 
         <!-- Play Games Services App ID (value references the string resource so it stays a string).
              Required for achievements + leaderboards. See tds-android/res values/strings.xml. -->

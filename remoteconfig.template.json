@@ -1,0 +1,74 @@
+{
+  "parameters": {
+    "analytics_debug": {
+      "defaultValue": {
+        "value": "false"
+      },
+      "valueType": "BOOLEAN"
+    },
+    "rate_reward_popup_enabled": {
+      "defaultValue": {
+        "value": "true"
+      },
+      "valueType": "BOOLEAN"
+    },
+    "admob_interstitial_id_ios": {
+      "defaultValue": {
+        "value": "ca-app-pub-3940256099942544/4411468910"
+      },
+      "description": "iOS interstitial unit id (Google TEST id until the iOS AdMob app exists)",
+      "valueType": "STRING"
+    },
+    "interstitial_frequency": {
+      "defaultValue": {
+        "value": "1"
+      },
+      "valueType": "NUMBER"
+    },
+    "admob_rewarded_id": {
+      "defaultValue": {
+        "value": "ca-app-pub-0164886809182937/8945166813"
+      },
+      "valueType": "STRING"
+    },
+    "rate_popup_every": {
+      "defaultValue": {
+        "value": "3"
+      },
+      "valueType": "NUMBER"
+    },
+    "rate_popup_enabled": {
+      "defaultValue": {
+        "value": "false"
+      },
+      "valueType": "BOOLEAN"
+    },
+    "admob_rewarded_id_ios": {
+      "defaultValue": {
+        "value": "ca-app-pub-3940256099942544/1712485313"
+      },
+      "description": "iOS rewarded unit id (Google TEST id until the iOS AdMob app exists)",
+      "valueType": "STRING"
+    },
+    "admob_interstitial_id": {
+      "defaultValue": {
+        "value": "ca-app-pub-0164886809182937/2395356324"
+      },
+      "valueType": "STRING"
+    },
+    "admob_banner_id": {
+      "defaultValue": {
+        "value": "ca-app-pub-0164886809182937/9551703290"
+      },
+      "description": "Android bottom banner unit id (always-on banner on every screen)",
+      "valueType": "STRING"
+    },
+    "admob_banner_id_ios": {
+      "defaultValue": {
+        "value": "ca-app-pub-3940256099942544/2934735716"
+      },
+      "description": "iOS banner unit id (Google TEST id until the iOS AdMob app exists)",
+      "valueType": "STRING"
+    }
+  }
+}

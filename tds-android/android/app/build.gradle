@@ -28,8 +28,8 @@ android {
         applicationId "com.TDS.zombietowerdefense"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10
-        versionName "1.0.9"
+        versionCode 21
+        versionName "1.0.20"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -42,8 +42,15 @@ android {
             if (hasKeystore) {
                 signingConfig signingConfigs.release
             }
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // R8: shrinks/obfuscates the dex; the mapping file is embedded in the AAB
+            // (BUNDLE-METADATA/…/proguard.map) so Play deobfuscates crashes automatically.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            // Native-lib symbol tables embedded in the AAB for Play's crash symbolication.
+            ndk {
+                debugSymbolLevel 'SYMBOL_TABLE'
+            }
         }
     }
 }
@@ -61,18 +68,60 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
 
-    // NOTE: native Firebase SDKs are intentionally NOT included. The game uses the Firebase
-    // Web SDK inside the WebView (see firebase.js / cloud.js / leaderboard.js) for auth,
-    // Firestore, analytics and remote config. Adding the native SDKs pulled in firebase-sessions,
-    // which crashed on launch (NoClassDefFoundError androidx.datastore.DataStoreFile) and is
-    // entirely redundant with the WebView SDK.
+    // Native Firebase: Crashlytics ONLY, for native crash visibility (the WebView Firebase Web
+    // SDK still handles auth/Firestore/analytics/remote config). Crashlytics pulls in
+    // firebase-sessions, which needs androidx.datastore 1.1+ — an older transitive datastore is
+    // what crashed v1.0(1) on launch (NoClassDefFoundError androidx.datastore.DataStoreFile),
+    // so the explicit 1.1.1 pins below are load-bearing. Verify after dependency changes with:
+    //   ./gradlew app:dependencies --configuration releaseRuntimeClasspath | grep datastore
+    implementation platform("com.google.firebase:firebase-bom:33.7.0")
+    implementation "com.google.firebase:firebase-crashlytics"
+    implementation "androidx.datastore:datastore:1.1.1"
+    implementation "androidx.datastore:datastore-preferences:1.1.1"
+
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
 }
 
-apply from: 'capacitor.build.gradle'
+// This is a pure-Java module (no Kotlin plugin), so Gradle lacks the Kotlin plugin's variant
+// rules and resolves Kotlin-multiplatform libraries (androidx.datastore, needed by
+// firebase-sessions) to their *jvm* variant — whose jar lacks the Android-only DataStoreFile
+// class, crashing the app at startup with NoClassDefFoundError (the Play-rejection crash of
+// v1.0(1)). Request the androidJvm platform type and register the same compatibility /
+// disambiguation rules the Kotlin plugin would, so KMP libs resolve to -android variants while
+// jvm-only KMP libs (androidx.annotation) and plain AARs/jars keep working.
+// Verify after Gradle/dep changes: the release AAB dex must contain Landroidx/datastore/DataStoreFile.
+class KotlinPlatformCompatRule implements AttributeCompatibilityRule<String> {
+    void execute(CompatibilityCheckDetails<String> details) {
+        if (details.consumerValue == "androidJvm" && details.producerValue in ["jvm", "common"]) {
+            details.compatible()
+        }
+    }
+}
+class KotlinPlatformDisambiguationRule implements AttributeDisambiguationRule<String> {
+    void execute(MultipleCandidatesDetails<String> details) {
+        if (details.candidateValues.contains("androidJvm")) {
+            details.closestMatch("androidJvm")
+        } else if (details.candidateValues.contains("jvm")) {
+            details.closestMatch("jvm")
+        }
+    }
+}
+def kotlinPlatformType = Attribute.of("org.jetbrains.kotlin.platform.type", String)
+dependencies.attributesSchema {
+    attribute(kotlinPlatformType) {
+        compatibilityRules.add(KotlinPlatformCompatRule)
+        disambiguationRules.add(KotlinPlatformDisambiguationRule)
+    }
+}
+configurations.all {
+    if (name.endsWith("RuntimeClasspath") || name.endsWith("CompileClasspath")) {
+        attributes.attribute(kotlinPlatformType, "androidJvm")
+    }
+}
 
-// (native Firebase / google-services + crashlytics plugins removed — the game uses the Firebase Web SDK
-//  in the WebView, so google-services.json is not processed natively.)
+apply from: 'capacitor.build.gradle'
+apply plugin: 'com.google.gms.google-services'
+apply plugin: 'com.google.firebase.crashlytics'

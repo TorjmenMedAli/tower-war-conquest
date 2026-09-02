@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Fredoka:wght@500;600;700&family=Luckiest+Guy&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=83" />
+<link rel="stylesheet" href="style.css?v=84" />
 </head>
 <body>
 <div class="app" id="app">
@@ -264,6 +264,7 @@
         <div class="rtitle def">DEFEAT</div>
         <div class="rsub">Your base fell — collect your coins, upgrade, and push further!</div>
         <div class="rcoinpill"><svg class="ic" width="26" height="26" viewBox="0 0 32 32"><circle cx="16" cy="16" r="14" fill="#e0982a" stroke="#0a1a38" stroke-width="2.5"/><circle cx="16" cy="16" r="9" fill="#ffd24a" stroke="#b07d22" stroke-width="2"/></svg><span>+<b id="defCoins">0</b></span></div>
+        <button class="rbtn green" id="defRevive"></button>
         <button class="rbtn gold" id="defDouble"></button>
         <button class="rbtn blue" id="defRetry">RETRY</button>
         <button class="rbtn green" id="defSkip" style="display:none">🎟️ SKIP LEVEL</button>
@@ -455,11 +456,11 @@
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-remote-config-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
-<script src="firebase.js?v=6"></script>
+<script src="firebase.js?v=15"></script>
 <script src="cloud.js?v=3"></script>
 <script src="leaderboard.js?v=3"></script>
-<script src="native.js?v=9"></script>
-<script src="iap.js?v=1"></script>
-<script src="game.js?v=143"></script>
+<script src="native.js?v=22"></script>
+<script src="iap.js?v=4"></script>
+<script src="game.js?v=156"></script>
 </body>
 </html>

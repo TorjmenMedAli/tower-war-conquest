@@ -1,5 +1,7 @@
 import UIKit
 import Capacitor
+import FirebaseCore
+import GoogleMobileAds
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
@@ -7,7 +9,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Native Firebase (Crashlytics + Analytics) activates only once GoogleService-Info.plist
+        // is present in the bundle (a build phase copies it in when the file exists at App/).
+        // Remote Config / Firestore / Auth stay on the Firebase Web SDK inside the WebView.
+        // GMA must not own the crash signal handlers — Crashlytics is the crash reporter here.
+        GADMobileAds.sharedInstance().disableSDKCrashReporting()
+        if Bundle.main.path(forResource: "GoogleService-Info", ofType: "plist") != nil {
+            FirebaseApp.configure()
+        }
         return true
     }
 

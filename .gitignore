@@ -33,3 +33,7 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/
+
+# Play Console debug symbols (build output)
+tds-android/native-debug-symbols/
+tds-android/native-debug-symbols.zip

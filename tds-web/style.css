@@ -5,6 +5,11 @@
   --red-top:#ff8a78;   --red-bot:#e0453a;   --red-edge:#a82b22;
   --panel-top:#3f74ac; --panel-bot:#234f7c; --panel-edge:#5a96cc;
   --gold:#ffe9a8;
+  /* Height of the native AdMob banner overlay. The banner is drawn by the plugin ON TOP of
+     the WebView (it does not resize it), so the page gives the space back itself: native.js
+     publishes the measured height here and .app shrinks by exactly that much. 0 with no
+     banner (web build, NO-ADS bundle, no fill) → layout is byte-identical to before. */
+  --ad-h: 0px;
 }
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 /* respect users who prefer reduced motion: calm the ambient animations */
@@ -18,12 +23,14 @@ body {
     radial-gradient(130% 90% at 50% -8%, #34405b 0%, #1b2233 46%, #0b0e16 100%);
   display: grid; place-items: center; overflow: hidden;
   user-select: none; -webkit-user-select: none;
+  /* keep the whole app clear of the banner strip at the bottom of the window */
+  padding-bottom: var(--ad-h, 0px);
 }
 .app {
   position: relative;
   width: min(100vw, 460px);
   height: min(100vh, 940px);
-  height: min(100dvh, 940px);   /* dvh = the real, dynamic viewport (accounts for mobile system bars) */
+  height: min(calc(100dvh - var(--ad-h, 0px)), 940px);   /* dvh = the real, dynamic viewport (accounts for mobile system bars) */
   overflow: hidden;
   background: #0f121a;
   border-radius: 26px;
@@ -32,7 +39,7 @@ body {
     0 0 0 1px rgba(255,255,255,.06) inset,
     0 1px 0 rgba(255,255,255,.12) inset;
 }
-@media (max-width: 480px) { .app { width: 100vw; height: 100vh; height: 100dvh; border-radius: 0; } }
+@media (max-width: 480px) { .app { width: 100vw; height: 100vh; height: calc(100dvh - var(--ad-h, 0px)); border-radius: 0; } }
 
 canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 /* subtle vignette/scrim over the canvas so UI text always reads */

@@ -4,5 +4,16 @@
   "webDir": "www",
   "android": {
     "allowMixedContent": true
+  },
+  "ios": {
+    "includePlugins": [
+      "@capacitor-community/admob",
+      "@capacitor/app",
+      "@capacitor/haptics",
+      "@capacitor/local-notifications",
+      "@capacitor/preferences",
+      "cordova-plugin-purchase",
+      "tds-gamecenter"
+    ]
   }
 }

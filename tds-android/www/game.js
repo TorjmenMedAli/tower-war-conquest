@@ -333,6 +333,8 @@ const Meta = {
   weekScore: null,                                       // weekly contest { w:'YYYY-Www', total } — same idea, weekly
   weekClaimed: '',                                       // last week whose contest prizes were already settled
   killsTotal: 0,                                         // lifetime zombies destroyed (achievements)
+  adsRew: 0, adsInt: 0,                                  // lifetime ads ACTUALLY seen (rewarded / interstitial) — analytics user props
+  upgrades: 0, iaps: 0,                                  // lifetime upgrades bought · IAPs granted — analytics user props
   starterBought: false, starterSeen: false,              // one-time STARTER PACK IAP · offer popup shown once
   sv: 0,                                                 // monotonic save version — cloud conflict resolution (last-write-wins)
   dailyDay: 0, adDay: 0, adChestUsed: 0, adCoinUsed: 0, adGemUsed: 0,    // daily free chest + per-day ad-box limits
@@ -359,7 +361,8 @@ const Meta = {
     sound:Meta.sound, stars:Meta.stars, ftue:Meta.ftue, starClaimed:Meta.starClaimed, pticket:Meta.pticket, pticketAt:Meta.pticketAt, rated:Meta.rated, ratePicked:Meta.ratePicked,
     endlessBest:Meta.endlessBest, bestScore:Meta.bestScore, name:Meta.name, wagonCapMig:Meta.wagonCapMig,
     monthScore:Meta.monthScore, monthClaimed:Meta.monthClaimed, weekScore:Meta.weekScore, weekClaimed:Meta.weekClaimed,
-    killsTotal:Meta.killsTotal, starterBought:Meta.starterBought, starterSeen:Meta.starterSeen, sv:Meta.sv })); } catch(e){} },
+    killsTotal:Meta.killsTotal, adsRew:Meta.adsRew, adsInt:Meta.adsInt, upgrades:Meta.upgrades, iaps:Meta.iaps,
+    starterBought:Meta.starterBought, starterSeen:Meta.starterSeen, sv:Meta.sv })); } catch(e){} },
   // castle stats — upgrading HP / the castle stage make the castle tankier
   heroMaxHp(){ return 430 + (Meta.hp - 1) * 70; },                          // hero core — the LAST line of defence (bigger base so a fresh run lasts ~1 min+)
   wagonMaxHp(){ return 200 + Meta.castle * 90 + Meta.wagon * WAGON_HP; },    // wagon shield — soaks damage first
@@ -373,6 +376,102 @@ const Meta = {
   castleCost(){ return Math.round((80 + Meta.castle * 110) * PLAY_GRIND); },
   wagonCost(){ return Math.round((120 + Meta.wagon * 240) * PLAY_GRIND); },
 };
+/* ================== ANALYTICS (Firebase) ==================================================
+   One crash-proof line per call site. Event/param naming rules kept deliberately tight:
+     • GA4 limits — event & param names ≤40 chars, string values ≤100, 25 params per event.
+     • Where GA4 already defines a game event we use ITS name, so the built-in reports fill
+       themselves: spend_virtual_currency / earn_virtual_currency / level_start / level_complete /
+       post_score / unlock_achievement.
+     • Our own events are `ad_*`, `upgrade`, `iap`, `claim` — few names, rich params, so one report
+       answers "which thing, where, paid with what" instead of needing an event per button.
+   Ads are counted where the TRUTH is known (see playRewardedAd / playInterstitial): an attempt is
+   not an impression, so `ad_attempt` and `ad_rewarded`/`ad_interstitial` are separate. */
+function trk(name, p){ try { if (window.TDSAnalytics) TDSAnalytics.log(name, p || {}); } catch (e) {} }
+function trkSpend(cur, amount, item){
+  trk('spend_virtual_currency', { virtual_currency_name: cur, value: Math.round(amount) || 0, item_name: String(item || '').slice(0, 90) });
+}
+function trkEarn(cur, amount, src){
+  trk('earn_virtual_currency', { virtual_currency_name: cur, value: Math.round(amount) || 0, source: String(src || '').slice(0, 90) });
+}
+// Every upgrade in the game funnels through here → one report shows what players upgrade and
+// whether they paid coins, gems or an ad for it.
+function trkUpgrade(kind, id, lvl, cost, pay){
+  Meta.upgrades = (Meta.upgrades | 0) + 1;
+  try { Meta.save(); } catch (e) {}   // callers save BEFORE calling us, so persist the counter ourselves
+  trk('upgrade', { kind: kind, item_id: String(id), level: lvl | 0, cost: Math.round(cost) || 0, pay: pay || 'coins' });
+  if (cost > 0 && (pay === 'coins' || pay === 'gems')) trkSpend(pay, cost, kind + ':' + id);
+}
+/* ---- paywall sessions -------------------------------------------------------------------
+   One open surface at a time. `dwell_ms` separates "rejected on sight" from "considered it and
+   the price lost", and `clicked_buy` separates browsing from an attempted purchase. Exits are
+   caught centrally (show() + tab switch + modal closers), so no route can miss the dismiss. */
+let _pw = null;
+function trkPaywallOpen(place){
+  if (_pw && _pw.place === place) return;                  // already open (re-render, not a new view)
+  trkPaywallClose();
+  _pw = { place: place, t0: Date.now(), buy: 0 };
+  trk('paywall_view', { place: place, coins: Meta.coins | 0, gems: Meta.gems | 0 });
+}
+function trkPaywallClose(){
+  if (!_pw) return;
+  const p = _pw; _pw = null;
+  trk('paywall_dismiss', { place: p.place, dwell_ms: Math.min(600000, Date.now() - p.t0), clicked_buy: p.buy });
+}
+// Rewarded-button intent — fires on EVERY tap, including the ones the game refuses, so the funnel
+// reads ad_click → ad_attempt → ad_rewarded(shown=1).
+function trkAdClick(place, outcome){ trk('ad_click', { place: place || 'unknown', outcome: outcome || 'started' }); }
+// Tapped something they can't afford: which wall, how far off, in what currency.
+function trkNoFunds(item, cost, cur){
+  const have = cur === 'gems' ? (Meta.gems | 0) : (Meta.coins | 0);
+  trk('insufficient_funds', { item_name: String(item).slice(0, 90), currency: cur, cost: Math.round(cost) || 0,
+                              balance: have, shortfall: Math.max(0, Math.round(cost) - have) });
+}
+/* ---- purchase failures: ONE EVENT PER ERROR CLASS ---------------------------------------
+   cordova-plugin-purchase reports everything through a single numeric code (base 6777000), which
+   buries "the player cancelled" (a pricing signal) in with "the product id is wrong" (our bug) and
+   "the network died" (transient). Each class gets its own event name so they can be alerted on and
+   charted separately; the raw code always rides along for drill-down. */
+const IAP_ERR = {
+  6777006: 'purchase_cancelled',                                                     // PAYMENT_CANCELLED
+  6777014: 'purchase_network_error', 6777025: 'purchase_network_error', 6777018: 'purchase_network_error',
+  6777001: 'purchase_store_error',   6777002: 'purchase_store_error',  6777003: 'purchase_store_error',
+  6777013: 'purchase_store_error',   6777033: 'purchase_store_error',  6777005: 'purchase_store_error',
+  6777028: 'purchase_store_error',
+  6777007: 'purchase_declined',      6777008: 'purchase_declined',     6777020: 'purchase_declined',
+  6777024: 'purchase_declined',      6777027: 'purchase_declined',
+  6777012: 'purchase_product_error', 6777023: 'purchase_product_error', 6777029: 'purchase_product_error',
+  6777030: 'purchase_product_error', 6777032: 'purchase_product_error', 6777015: 'purchase_product_error',
+  6777016: 'purchase_verify_error',  6777017: 'purchase_verify_error',  6777031: 'purchase_verify_error',
+  6777004: 'purchase_verify_error',
+};
+function trkPurchaseError(err, productId, place){
+  let code = 0, msg = '';
+  if (err && typeof err === 'object'){ code = err.code | 0; msg = String(err.message || ''); }
+  else { msg = String(err || ''); }
+  // Our own pre-flight rejections (see iap.js doBuy) never reach the store at all.
+  let name = IAP_ERR[code] ||
+    (/iap-unavailable|no-offer|not-ready/.test(msg) ? 'purchase_unavailable' : 'purchase_error');
+  trk(name, { product_id: String(productId || ''), place: place || (_pw ? _pw.place : 'unknown'),
+              code: code, message: msg.slice(0, 90) });
+}
+// Bucketed user properties — segmentation without exploding cardinality (GA4 caps 25 props).
+function bucket(n){
+  n = n | 0;
+  return n === 0 ? '0' : n < 3 ? '1-2' : n < 6 ? '3-5' : n < 11 ? '6-10' : n < 26 ? '11-25' : n < 51 ? '26-50' : '50+';
+}
+function trkProfile(){
+  const A = window.TDSAnalytics; if (!A || !A.setUserProp) return;
+  A.setUserProp('level_reached',    String(Meta.unlocked | 0));
+  A.setUserProp('games_played',     bucket(Meta.games));
+  A.setUserProp('ads_rewarded',     bucket(Meta.adsRew));      // lifetime rewarded ads actually WATCHED
+  A.setUserProp('ads_interstitial', bucket(Meta.adsInt));      // lifetime interstitials actually SHOWN
+  A.setUserProp('upgrades_done',    bucket(Meta.upgrades));
+  A.setUserProp('spender',          (Meta.iaps | 0) > 0 ? 'yes' : 'no');
+  A.setUserProp('no_ads',           Meta.noAds ? 'yes' : 'no');
+  A.setUserProp('heroes_owned',     String((Meta.heroesOwned || []).length));
+  A.setUserProp('best_score',       bucket(Math.round((Meta.bestScore | 0) / 1000)));   // in thousands
+}
+
 Meta.load();
 // normalize after load (migrate older single-weapon saves)
 if (!Array.isArray(Meta.weapons)){ Meta.weapons = Meta.weapon ? [Meta.weapon] : [1, 2]; }
@@ -442,9 +541,22 @@ const heroDmg   = h => (h.dmg || 18) * (1 + 0.12 * (heroLevel(h) - 1)) * rarityM
 const $ = id => document.getElementById(id);
 function bump(el){ if (!el) return; el.classList.remove('bump'); void el.offsetWidth; el.classList.add('bump'); }
 const screens = { menu: $('menu'), game: $('game'), shop: $('shop'), levels: $('levels'), weapons: $('weapons'), heroes: $('heroes'), forces: $('forces') };
+let _runLive = false;                                      // a battle is in progress (neither won nor lost yet)
+function trkLevelQuit(){
+  if (!_runLive) return;
+  _runLive = false;
+  trk('level_quit', { level: state.level, level_name: (LEVELS[state.level - 1] || {}).name || '',
+                      progress_pct: Math.min(100, Math.round(state.scroll / levelLen() * 100)), score: state.score | 0,
+                      kills: state.kills | 0, endless: state.endless ? 1 : 0, games: Meta.games | 0 });
+  trkProfile();
+}
 function show(name){
+  if (name !== 'game' && state.screen === 'game') trkLevelQuit();   // walked out mid-battle
+  if (name !== 'shop') trkPaywallClose();                  // every route out of the shop lands here
   for (const k in screens) screens[k].classList.toggle('active', k === name);
   state.screen = name;
+  // Bottom banner rides the battle scene only: up on every level, down everywhere else.
+  try { if (window.AdBridge && AdBridge.banner) AdBridge.banner.set(name === 'game'); } catch (e) {}
   if (window.TDSAnalytics) TDSAnalytics.screen(name);   // Firebase: log the page/screen visit
   if (name === 'menu') refreshMenu();
   if (name === 'shop') refreshShop();
@@ -487,9 +599,9 @@ const lvEase = lv => Math.pow(LV_T(lv), 1.7);                                   
 // level takes ≈20–30 earn-and-upgrade plays to clear. The jumps DECAY (×2.3 early → ×1.15
 // late) because the player's relative power growth per play also decays as upgrades get
 // pricier; a fixed geometric ramp made late levels unclearable. Re-run #dbgsim after touching.
-const HP_MUL = [0.35, 0.97, 2.20, 4.40, 8.30, 11.9, 15.0, 18.0, 21.1, 23.1];
+const HP_MUL = [0.10, 0.97, 2.20, 4.40, 8.30, 11.9, 15.0, 18.0, 21.1, 23.1];
 const enemyHpMul  = lv => HP_MUL[Math.max(0, Math.min(HP_MUL.length - 1, lv - 1))];
-const enemyDmgMul = lv => 0.5 + 0.30 * (lv - 1);      // enemy damage per level (L1 0.5× … L10 3.2×, linear)
+const enemyDmgMul = lv => lv <= 1 ? 0.25 : 0.5 + 0.30 * (lv - 1);      // enemy damage per level (L1 0.5× … L10 3.2×, linear)
 // Player "Power" — one rating from equipped gear (weapon DPS + hero DPS, scaled by
 // the global damage mult and survivability). Lets the UI warn when a level outclasses
 // the player so they know to upgrade. reqPower = recommended rating to clear level L,
@@ -509,7 +621,7 @@ function playerPower(){
 }
 // Recommended Power per level — measured with the #dbgsim grind harness (the player Power on
 // the run that actually cleared each level after steady upgrading). Purely advisory in the UI.
-const REQ_PW = [5100, 24000, 77000, 260000, 590000, 1340000, 2400000, 3800000, 5700000, 8000000];
+const REQ_PW = [1200, 24000, 77000, 260000, 590000, 1340000, 2400000, 3800000, 5700000, 8000000];
 const reqPower = L => REQ_PW[Math.max(0, Math.min(REQ_PW.length - 1, L - 1))];
 // Pick the 4 enemy types fielded by a level. The window of eligible roster indices
 // (UndeadArt.ROSTER is ordered weakest → strongest) slides toward the dangerous tail as
@@ -534,7 +646,7 @@ try { window.state = state; window.Meta = Meta; window.startRun = startRun; wind
 
 const S = () => H / 900;
 const groundY = () => H * 0.70;
-const levelLen = () => (16000 + ((state.level || 1) - 1) * 2200) * S();   // finish distance (L1 16000 ≈ 2.8min … L10 35800 ≈ 6.2min + fort/boss fights)
+const levelLen = () => ((state.level || 1) <= 1 ? 10000 : 16000 + ((state.level || 1) - 1) * 2200) * S();   // finish distance (L1 10000 ≈ 1.7min — eased for onboarding; L2 18200 … L10 35800 + fort/boss fights)
 try { window.levelLen = levelLen; } catch(e){}
 try { window.TDS_BUSY = () => state.screen === 'game' && !state.over; } catch(e){}   // cloud.js: don't reload mid-battle
 
@@ -713,7 +825,7 @@ function startRun(){
   const bank = Meta.energy || 0;
   if (bank){ Meta.energy = 0; Meta.save(); }
   Object.assign(state, { energy: bank, score: 0, paused: false, over: false, won: false, level: lv,
-    ult: 0, ultReady: false, kills: 0,   // state.endless is set by the caller (startEndless=true, selectLevel=false) and preserved across a retry
+    ult: 0, ultReady: false, kills: 0, revived: false,   // state.endless is set by the caller (startEndless=true, selectLevel=false) and preserved across a retry
     enemies: [], allies: [], shots: [], eshots: [], pops: [], parts: [], zones: [], props: [], bombs: [], plane: null, planes: [], fxAcc: 0, frost: 0,
     boss: null, bossDead: false, bossT: 0, heroHurt: 0, heroDeadAt: 0,
     fort: null, fortDead: false, fortT: 0,
@@ -739,6 +851,7 @@ function startRun(){
   $('pauseModal').classList.remove('active');
   show('game');
   if (!window.__sim && window.TDSAnalytics) TDSAnalytics.log('level_start', { level: lv, level_name: (LEVELS[lv - 1] || {}).name || ('LEVEL ' + lv) });
+  _runLive = !window.__sim;                                // armed until the run ends OR is abandoned
   buildSfBar();
   refreshHud();
   refreshHp();
@@ -752,6 +865,7 @@ function startEndless(){
   if (!endlessUnlocked()){ show('levels'); return; }
   Meta.level = LEVELS.length;                 // scale from the hardest campaign level
   state.endless = true;
+  trk('endless_start', { best: Meta.endlessBest | 0, games: Meta.games | 0 });
   startRun();                                 // startRun resets the endless ramp baselines (endlessT/hpMul0)
 }
 function setEnergy(v){ const old = state.energy; state.energy = Math.max(0, Math.round(v)); refreshHud(); if (state.energy > old) bump($('g_energy')); }
@@ -1109,18 +1223,56 @@ function paintStars(n){
 // simulated rewarded video — a short overlay, then it resolves and the caller grants the bonus.
 // ADMOB HOOK (rewarded): replace the overlay body with your rewarded-ad show() and call
 // done() from the "user earned reward" callback.
-function playRewardedAd(done){
-  if (Meta.noAds){ done(); return; }                       // NO-ADS bundle: rewards resolve instantly
-  const RC = window.TDSRemoteConfig;                        // Firebase Remote Config gates the ads
-  if (RC && (!RC.getBool('ads_enabled') || !RC.getBool('rewarded_enabled'))){ done(); return; }  // off remotely → still grant the reward
-  if (window.TDSAnalytics) TDSAnalytics.log('ad_impression', { ad_type: 'rewarded', ad_platform: (window.AdBridge && AdBridge.rewarded) ? 'admob' : 'sim' });
-  if (window.AdBridge && AdBridge.rewarded){ AdBridge.rewarded(done); return; }   // native AdMob (Android build)
-  const m = $('adModal'), c = $('adCount'), tx = $('adTxt'); if (!m){ done(); return; }
+// Loading overlay reused by the native AdMob bridge (native.js) while a rewarded ad loads.
+window.TDSAdOverlay = {
+  show(txt){
+    const m = $('adModal'), c = $('adCount'), tx = $('adTxt'); if (!m) return;
+    if (tx) tx.textContent = txt || 'Loading ad…';
+    if (c) c.textContent = '';
+    m.classList.add('active');
+  },
+  hide(){ const m = $('adModal'); if (m) m.classList.remove('active'); },
+};
+// SINGLE-FLIGHT: only one rewarded flow at a time. Without this, a double-tap on any ▶ button ran
+// two flows and the reward was granted twice — visibly so when no ad was loaded and each flow
+// resolved instantly. Every caller below goes through here, so the guard covers all of them.
+// `settled` (optional) always runs when the flow ends, granted or not — callers that disable their
+// button on tap use it to re-enable when the player closed the ad without earning.
+// `place` (optional) labels WHERE the ad was requested (shop_coins, weapon_upgrade, …) so the
+// analytics answer "which ad placements do players actually use" — it changes no behaviour.
+let _rewBusy = false;
+function playRewardedAd(done, settled, place){
+  trkAdClick(place, _rewBusy ? 'busy' : (Meta.noAds ? 'noads_bundle' : 'started'));
+  if (_rewBusy){ trk('ad_blocked', { ad_type: 'rewarded', place: place || 'unknown' }); return; }   // second tap while a flow runs
+  _rewBusy = true;
+  place = place || 'unknown';
+  const native = !!(window.AdBridge && AdBridge.rewarded);
+  const grant = (() => { let paid = false; return () => { if (paid) return; paid = true; done(); }; })();
+  const free  = (() => { let out = false; return () => { if (out) return; out = true; _rewBusy = false; if (settled) settled(); }; })();
+  // Fires ONCE per tap with the real outcome. `shown` is the honest impression flag: 1 only when an
+  // ad was actually put on screen, so ad_rewarded(shown=1) is comparable to AdMob's impressions.
+  const report = (() => { let sent = false; return o => {
+    if (sent) return; sent = true;
+    o = o || {};
+    if (o.shown) { Meta.adsRew = (Meta.adsRew | 0) + 1; Meta.save(); }
+    trk('ad_rewarded', { place: place, result: o.reason || 'unknown', shown: o.shown ? 1 : 0, earned: o.earned ? 1 : 0,
+                         ad_platform: native ? 'admob' : 'sim' });
+    trkProfile();
+  }; })();
+  if (Meta.noAds){ report({ shown: 0, earned: 1, reason: 'noads_bundle' }); free(); grant(); return; }   // NO-ADS bundle
+  // (no remote on/off switch — the format is governed by whether its admob_* unit id is published)
+  trk('ad_attempt', { ad_type: 'rewarded', place: place, ad_platform: native ? 'admob' : 'sim' });
+  // AdBridge hands the outcome to `settled` ({shown, earned, reason}); nothing else knows whether an
+  // ad really appeared. NOTE: our manual ad events are deliberately NOT called `ad_impression` —
+  // that name is auto-logged by the AdMob↔Firebase link, and reusing it would pollute that report.
+  if (native){ AdBridge.rewarded(grant, o => { report(o); free(); }, place); return; }
+  const m = $('adModal'), c = $('adCount'), tx = $('adTxt');
+  if (!m){ report({ shown: 0, earned: 1, reason: 'no_overlay' }); free(); grant(); return; }
   if (tx) tx.textContent = 'Rewarded video…';
   let t = 3; if (c) c.textContent = t; m.classList.add('active');
   const iv = setInterval(() => {
     t--; if (t > 0){ if (c) c.textContent = t; }
-    else { clearInterval(iv); m.classList.remove('active'); done(); }
+    else { clearInterval(iv); m.classList.remove('active'); report({ shown: 1, earned: 1, reason: 'sim' }); free(); grant(); }
   }, 700);
 }
 // INTERSTITIAL — auto-plays after EVERY battle, win or lose, before the result card.
@@ -1129,31 +1281,41 @@ function playRewardedAd(done){
 // The NO-ADS bundle (Meta.noAds) skips these forced ads entirely; rewarded ads remain.
 let _interstitialTick = 0;   // counts battle-ends → drives Remote Config's interstitial_frequency
 function playInterstitial(done){
-  if (Meta.noAds || window.__sim){ done(); return; }
-  const RC = window.TDSRemoteConfig;                        // Firebase Remote Config gates the ads
-  if (RC && (!RC.getBool('ads_enabled') || !RC.getBool('interstitial_enabled'))){ done(); return; }
+  const native = !!(window.AdBridge && AdBridge.interstitial);
+  // Same honest-impression rule as rewarded: only count what actually reached the screen. `reason`
+  // separates the two ways a battle ends with no ad — the NO-ADS bundle, the frequency gate, or no fill.
+  const report = (() => { let sent = false; return (shown, reason) => {
+    if (sent) return; sent = true;
+    if (shown){ Meta.adsInt = (Meta.adsInt | 0) + 1; Meta.save(); }
+    trk('ad_interstitial', { result: reason, shown: shown ? 1 : 0, ad_platform: native ? 'admob' : 'sim',
+                             battle: _interstitialTick, level: state ? (state.level | 0) : 0 });
+  }; })();
+  if (Meta.noAds || window.__sim){ report(0, Meta.noAds ? 'noads_bundle' : 'sim_run'); done(); return; }
+  const RC = window.TDSRemoteConfig;                        // Remote Config still drives the cadence
   const freq = RC ? Math.max(1, Math.round(RC.getNumber('interstitial_frequency'))) : 1;
-  if ((++_interstitialTick) % freq !== 0){ done(); return; }   // show only every Nth battle
-  if (window.TDSAnalytics) TDSAnalytics.log('ad_impression', { ad_type: 'interstitial', ad_platform: (window.AdBridge && AdBridge.interstitial) ? 'admob' : 'sim' });
-  if (window.AdBridge && AdBridge.interstitial){ AdBridge.interstitial(done); return; }   // native AdMob (Android build)
-  const m = $('adModal'), c = $('adCount'), tx = $('adTxt'); if (!m){ done(); return; }
+  if ((++_interstitialTick) % freq !== 0){ report(0, 'frequency_gate'); done(); return; }   // show only every Nth battle
+  trk('ad_attempt', { ad_type: 'interstitial', place: 'post_battle', ad_platform: native ? 'admob' : 'sim' });
+  // AdBridge passes a `shown` flag to done() — it is the only place that knows if an ad appeared.
+  if (native){ AdBridge.interstitial(shown => { report(shown ? 1 : 0, shown ? 'shown' : 'no_fill'); done(); }); return; }
+  const m = $('adModal'), c = $('adCount'), tx = $('adTxt'); if (!m){ report(0, 'no_overlay'); done(); return; }
   if (tx) tx.textContent = 'Advertisement…';
   let t = 3; if (c) c.textContent = t; m.classList.add('active');
   const iv = setInterval(() => {
     t--; if (t > 0){ if (c) c.textContent = t; }
-    else { clearInterval(iv); m.classList.remove('active'); done(); }
+    else { clearInterval(iv); m.classList.remove('active'); report(1, 'sim'); done(); }
   }, 700);
 }
 // "COLLECT ×2": watch the ad, then add the run's coins a second time (total = 2×)
 function doubleReward(which){
-  if (state.doubled) return;
+  if (state.doubled){ trkAdClick(which === 'vic' ? 'victory_double' : 'defeat_double', 'already_done'); return; }
   playRewardedAd(() => {
     state.doubled = true;
     Meta.coins += (state.coinReward || 0); Meta.save();
     const lbl = $(which === 'vic' ? 'vicCoins' : 'defCoins'); if (lbl) lbl.textContent = (state.coinReward || 0) * 2;
     const btn = $(which === 'vic' ? 'vicDouble' : 'defDouble');
     if (btn){ btn.disabled = true; btn.classList.add('done'); btn.innerHTML = '✓ DOUBLED'; }
-  });
+    trkEarn('coins', state.coinReward || 0, 'ad_double_' + which);
+  }, null, which === 'vic' ? 'victory_double' : 'defeat_double');
 }
 // queue a level-cleared reward chest (scales with the level)
 function queueLevelReward(level, advanced){
@@ -1235,7 +1397,13 @@ function showRewardModal(r, onClaim){
   if (dbl){
     const can = r.adDouble !== false && (r.coins || r.gems);
     dbl.style.display = can ? '' : 'none'; dbl.disabled = false;
-    dbl.onclick = () => { dbl.disabled = true; playRewardedAd(() => grant(2)); };
+    // re-enable ONLY if nothing was granted (ad closed early / never appeared), so the ×2 isn't
+    // lost to a dead button — and can't be claimed a second time either.
+    dbl.onclick = () => {
+      dbl.disabled = true;
+      let paid = false;
+      playRewardedAd(() => { paid = true; grant(2); }, () => { if (!paid) dbl.disabled = false; }, 'reward_double');
+    };
   }
   $('rewardModal').classList.add('active');
 }
@@ -1266,7 +1434,11 @@ function showRateStars(done){
   row.style.display = ''; ok.style.display = 'none'; close.style.display = '';
   stars.forEach(b => b.classList.remove('lit'));
   let picked = false;
-  const finish = (low) => { modal.classList.remove('active'); done(!!low); };
+  trk('rate_popup_shown', { popup: 'stars', games: Meta.games | 0 });
+  const finish = (low) => {
+    if (!picked) trk('rate_popup_dismissed', { popup: 'stars' });     // closed without giving a rating
+    modal.classList.remove('active'); done(!!low);
+  };
   stars.forEach(b => b.onclick = () => {
     if (picked) return; picked = true;
     const n = +b.dataset.star;
@@ -1295,10 +1467,17 @@ function showRatingFlow(done){
 function showRatingModal(done){
   const modal = $('rateModal'); if (!modal){ done && done(); return; }
   const goodies = $('rateGoodies'); if (goodies) goodies.innerHTML = `<span class="rpill coin">${ICON_COIN}+${RATE_REWARD}</span>`;
-  const finish = () => { modal.classList.remove('active'); done && done(); };
+  trk('rate_popup_shown', { popup: 'reward', games: Meta.games | 0, reward: RATE_REWARD });
+  let went = false;
+  const finish = () => {
+    if (!went) trk('rate_popup_dismissed', { popup: 'reward' });      // "later" / closed
+    modal.classList.remove('active'); done && done();
+  };
   $('rateGo').onclick = () => {
+    went = true;
+    trk('rate_popup_action', { popup: 'reward', action: 'store_opened' });
     try { window.open(STORE_URL, '_blank'); } catch (e) {}
-    if (!Meta.rated){ Meta.rated = true; Meta.coins += RATE_REWARD; SFX.play('coin'); Meta.save(); refreshMenu(); }
+    if (!Meta.rated){ Meta.rated = true; Meta.coins += RATE_REWARD; SFX.play('coin'); Meta.save(); trkEarn('coins', RATE_REWARD, 'rate_reward'); refreshMenu(); }
     finish();
   };
   $('rateLater').onclick = finish;
@@ -1316,15 +1495,21 @@ function proceed(action){
 
 function gameOver(){
   if (state.over) return;
-  state.over = true; state.heroDeadAt = state.t;
+  state.over = true; state.heroDeadAt = state.t; _runLive = false;
   buzz('heavy');
   refreshUltBtn();                              // hide the ultimate button on defeat
   if (state.endless){ Meta.endlessBest = Math.max(Meta.endlessBest | 0, state.score | 0); Meta.save(); }   // record survival best
   // consolation coins are only CREDITED when the player leaves (retry/menu)
   state.coinReward = Math.round(state.score * levelCoinMul(state.level) * coinBoost()); state.doubled = false;
-  if (!window.__sim && window.TDSAnalytics) TDSAnalytics.log('level_fail', { level: state.level, score: state.score, progress_pct: Math.min(100, Math.round(state.scroll / levelLen() * 100)) });
+  if (!window.__sim){
+    trk('level_fail', { level: state.level, level_name: (LEVELS[state.level - 1] || {}).name || '', score: state.score | 0,
+                        progress_pct: Math.min(100, Math.round(state.scroll / levelLen() * 100)), kills: state.kills | 0,
+                        endless: state.endless ? 1 : 0, games: Meta.games | 0 });
+    trkProfile();
+  }
   SFX.play('lose');
   $('defCoins').textContent = state.coinReward;
+  const rv = $('defRevive'); if (rv){ rv.style.display = state.revived ? 'none' : ''; rv.disabled = false; rv.innerHTML = ICON_PLAY + 'CONTINUE'; }
   resetDoubleBtn($('defDouble'));
   refreshSkipBtn();
   // let the convoy's death/explosion animation play out (1.5s) → post-battle interstitial → defeat card
@@ -1333,12 +1518,28 @@ function gameOver(){
 }
 // defeat COLLECT ×2: watch an ad to double the consolation (credited on give-up); no immediate Meta change
 function defeatDouble(){
-  if (state.doubled) return;
+  if (state.doubled){ trkAdClick('defeat_double', 'already_done'); return; }
   playRewardedAd(() => {
     state.doubled = true;
     const lbl = $('defCoins'); if (lbl) lbl.textContent = (state.coinReward || 0) * 2;
     const b = $('defDouble'); if (b){ b.disabled = true; b.classList.add('done'); b.innerHTML = '✓ DOUBLED'; }
-  });
+    trkEarn('coins', state.coinReward || 0, 'ad_double_defeat');
+  }, null, 'defeat_double');
+}
+// CONTINUE (defeat card): watch a rewarded ad to revive the convoy ONCE per run — full HP,
+// the field wiped clean, and the battle resumes where it fell. Nothing is credited or tallied:
+// the run simply isn't over yet, so the eventual victory/defeat flow pays out as usual.
+function defeatRevive(){
+  if (state.revived || !state.over || state.won){ trkAdClick('defeat_revive', 'already_done'); return; }
+  playRewardedAd(() => {
+    state.revived = true;
+    closeResultModals();
+    if (state.castle) state.castle.hp = state.castle.maxHp;
+    state.enemies.length = 0; state.eshots.length = 0; state.bombs.length = 0;
+    state.over = false; state.heroDeadAt = 0; state.heroHurt = 0; _runLive = true;
+    state.frost = FROST_DUR;                       // a breather: the next spawns come in slowed
+    refreshUltBtn(); SFX.play('chest'); buzz('success');
+  }, null, 'defeat_revive');
 }
 // give up the run: credit the consolation coins (×2 if doubled) and count the game played
 function finalizeDefeat(){
@@ -1365,7 +1566,7 @@ function skipLevel(){
 // reached the finish line — win, bonus coins, unlock the next level, grant a clear reward
 function levelComplete(){
   if (state.over) return;
-  state.over = true; state.won = true;
+  state.over = true; state.won = true; _runLive = false;
   buzz('success');
   refreshUltBtn();                                 // hide the ultimate button on victory
   const firstClear = !Meta.stars[state.level];    // no star recorded yet → this is the first-ever clear
@@ -1376,7 +1577,13 @@ function levelComplete(){
   state.winStars = hpFrac > 0.66 ? 3 : hpFrac > 0.33 ? 2 : 1;
   Meta.stars[state.level] = Math.max(Meta.stars[state.level] || 0, state.winStars);   // best stars persist → level map
   missionEvent('star', state.winStars);
-  if (!window.__sim && window.TDSAnalytics) TDSAnalytics.log('level_complete', { level: state.level, stars: state.winStars, coins: reward });
+  if (!window.__sim){
+    trk('level_complete', { level: state.level, level_name: (LEVELS[state.level - 1] || {}).name || '', stars: state.winStars,
+                            coins: reward, score: state.score | 0, kills: state.kills | 0, endless: state.endless ? 1 : 0,
+                            games: Meta.games | 0 });
+    trkEarn('coins', reward, 'level_complete');
+    trkProfile();
+  }
   SFX.play('win');
   // clearing the frontier level unlocks the next one AND selects it, so PLAY continues the campaign
   const advanced = (state.level >= Meta.unlocked && Meta.unlocked < LEVELS.length);
@@ -2449,9 +2656,9 @@ function refreshTikUi(){
   const t = $('tikT'); if (t) t.textContent = tikCountdownText();
   const mn = $('tkModalN'); if (mn) mn.textContent = 'Next ticket: ' + tikCountdownText();
 }
-function openTicketModal(){ regenTickets(); refreshTikUi(); $('ticketModal').classList.add('active'); }
-function closeTicketModal(){ $('ticketModal').classList.remove('active'); }
-function adTicket(){ playRewardedAd(() => { grantTicket(1); SFX.play('coin'); closeTicketModal(); refreshMenu(); }); }
+function openTicketModal(){ regenTickets(); refreshTikUi(); $('ticketModal').classList.add('active'); trkPaywallOpen('ticket_gate'); }
+function closeTicketModal(){ $('ticketModal').classList.remove('active'); trkPaywallClose(); }
+function adTicket(){ playRewardedAd(() => { grantTicket(1); trk('claim', { what: 'ticket', pay: 'ad' }); SFX.play('coin'); closeTicketModal(); refreshMenu(); }, null, 'ticket_modal'); }
 
 /* ---------------- Sound toggle (menu chip + pause modal) ---------------- */
 function refreshSndUi(){
@@ -2501,9 +2708,11 @@ function claimStreak(){
   const base = streakReward(Meta.streak); Meta.coins += base; streakBonus = base;
   if (Meta.streak % 7 === 0) Meta.gems += 20;              // day-7 calendar bonus: +20 💎 on top of the coins
   Meta.save();
+  trk('claim', { what: 'streak', pay: 'free', day: Meta.streak | 0 });
+  trkEarn('coins', base, 'streak_day' + (Meta.streak | 0));
   openStreak(); refreshMenu();
 }
-function streakDoubleAd(){ if (streakBonus <= 0) return; const b = streakBonus; playRewardedAd(() => { Meta.coins += b; streakBonus = 0; Meta.save(); openStreak(); refreshMenu(); }); }
+function streakDoubleAd(){ if (streakBonus <= 0){ trkAdClick('streak_double', 'unavailable'); return; } const b = streakBonus; playRewardedAd(() => { Meta.coins += b; streakBonus = 0; Meta.save(); trkEarn('coins', b, 'ad_streak_double'); openStreak(); refreshMenu(); }, null, 'streak_double'); }
 function closeStreak(){ streakBonus = 0; const m = $('streakModal'); if (m) m.classList.remove('active'); }
 function openStreak(){
   const claimable = streakClaimable(), cur = streakNext(), base = Math.floor((cur - 1) / 7) * 7;
@@ -2532,6 +2741,14 @@ function openStreak(){
   const m = $('streakModal'); if (m) m.classList.add('active');
 }
 
+// Makes a greyed-out price button report the wall it represents. `disabled` stays for styling;
+// pointer-events:none lets the tap reach the card, which logs it and does nothing else.
+function wallTap(card, btn, item, cost, cur){
+  if (!btn) return;
+  btn.style.pointerEvents = 'none';
+  card.style.cursor = 'default';
+  card.addEventListener('click', () => trkNoFunds(item, cost, cur));
+}
 function shopCard(o){
   const card = document.createElement('div');
   card.className = 'shop-card' + (o.badge ? ' hot' : '');
@@ -2543,7 +2760,10 @@ function shopCard(o){
     + `<button class="sc-buy${o.owned ? ' owned' : ''}"${o.owned ? ' disabled' : ''}>${label}</button>`;
   const btn = card.querySelector('.sc-buy');
   if (btn && !o.owned){
-    if (o.afford === false) btn.disabled = true;           // can't pay → greyed out, not silent
+    if (o.afford === false){                               // can't pay → greyed out, not silent
+      btn.disabled = true;
+      wallTap(card, btn, o.wallItem || o.name, o.wallCost || 0, o.wallCur || 'gems');
+    }
     else if (o.onBuy) btn.addEventListener('click', o.onBuy);
   }
   return card;
@@ -2555,14 +2775,18 @@ function chestTile(kind){
   const afford = c.priceGems ? Meta.gems >= c.priceGems : Meta.coins >= c.priceCoins;
   tile.innerHTML = `<div class="ct-ico">${ICON_CHEST}</div><b class="ct-name">${c.short}</b><span class="ct-tag">${c.rarity}</span><button class="sc-buy"${afford ? '' : ' disabled'}>${price}</button>`;
   if (afford) tile.querySelector('.sc-buy').addEventListener('click', () => buyChest(kind));
+  else wallTap(tile, tile.querySelector('.sc-buy'), 'chest:' + kind, c.priceGems || c.priceCoins, c.priceGems ? 'gems' : 'coins');
   return tile;
 }
+let _lastTxId = '';                                        // GA4 purchase dedup (restore re-grants)
 function buyChest(kind){
   const c = CHESTS[kind];
-  if (c.priceGems && Meta.gems < c.priceGems) return;
-  if (c.priceCoins && Meta.coins < c.priceCoins) return;
+  if (c.priceGems && Meta.gems < c.priceGems){ trkNoFunds('chest:' + kind, c.priceGems, 'gems'); return; }
+  if (c.priceCoins && Meta.coins < c.priceCoins){ trkNoFunds('chest:' + kind, c.priceCoins, 'coins'); return; }
   if (c.priceGems) Meta.gems -= c.priceGems; else Meta.coins -= c.priceCoins;
   Meta.save();
+  trkSpend(c.priceGems ? 'gems' : 'coins', c.priceGems || c.priceCoins, 'chest:' + kind);
+  trk('chest_open', { kind: kind, rarity: String(c.rarity || ''), pay: c.priceGems ? 'gems' : 'coins' });
   const coins = randInt(c.coins[0], c.coins[1]), gems = randInt(c.gems[0], c.gems[1]);
   showRewardModal({ icon: ICON_CHEST, accent: c.accent, title: c.name, tag: c.rarity.toUpperCase(), desc: 'You cracked it open!', coins, gems },
     () => { $('rewardModal').classList.remove('active'); refreshShop(); refreshMenu(); });
@@ -2571,22 +2795,28 @@ function buyChest(kind){
 function claimDaily(){
   if (Meta.dailyDay >= dayNum()) return;
   Meta.dailyDay = dayNum(); Meta.save();
+  trk('claim', { what: 'daily_chest', pay: 'free' });
   showRewardModal({ icon: ICON_GIFT, accent: '#ffd24a', title: 'DAILY REWARD', tag: 'COME BACK TOMORROW', desc: 'Your free daily chest!', coins: Math.round(randInt(80, 140) * levelCoinMul(Meta.level)), gems: randInt(2, 4) },
     () => { $('rewardModal').classList.remove('active'); refreshShop(); refreshMenu(); });
 }
 function openAdChest(){
   rollShopDay(); if (Meta.adChestUsed >= AD_CHEST_MAX) return;
   playRewardedAd(() => { Meta.adChestUsed = (Meta.adChestUsed || 0) + 1; Meta.save();
+    trk('claim', { what: 'ad_chest', pay: 'ad', used_today: Meta.adChestUsed | 0 });
     showRewardModal({ icon: ICON_CHEST, accent: '#7cd84e', title: 'AD CHEST', tag: 'FREE LOOT', desc: 'Thanks for watching!', coins: Math.round(randInt(50, 110) * levelCoinMul(Meta.level)), gems: randInt(0, 1) },
-      () => { $('rewardModal').classList.remove('active'); refreshShop(); refreshMenu(); }); });
+      () => { $('rewardModal').classList.remove('active'); refreshShop(); refreshMenu(); }); }, null, 'shop_chest');
 }
 function claimAdCoins(){
-  rollShopDay(); if (Meta.adCoinUsed >= AD_COIN_MAX) return;
-  playRewardedAd(() => { Meta.adCoinUsed = (Meta.adCoinUsed || 0) + 1; Meta.coins += adCoinReward(); Meta.save(); refreshShop(); refreshMenu(); });
+  rollShopDay(); if (Meta.adCoinUsed >= AD_COIN_MAX){ trkAdClick('shop_coins', 'cap_reached'); return; }
+  playRewardedAd(() => { const r = adCoinReward(); Meta.adCoinUsed = (Meta.adCoinUsed || 0) + 1; Meta.coins += r; Meta.save();
+    trkEarn('coins', r, 'ad_shop_coins'); trk('claim', { what: 'ad_coins', pay: 'ad', used_today: Meta.adCoinUsed | 0 });
+    refreshShop(); refreshMenu(); }, null, 'shop_coins');
 }
 function claimAdGems(){
-  rollShopDay(); if (Meta.adGemUsed >= AD_GEM_MAX) return;
-  playRewardedAd(() => { Meta.adGemUsed = (Meta.adGemUsed || 0) + 1; Meta.gems += AD_GEM_REWARD; Meta.save(); refreshShop(); refreshMenu(); });
+  rollShopDay(); if (Meta.adGemUsed >= AD_GEM_MAX){ trkAdClick('shop_gems', 'cap_reached'); return; }
+  playRewardedAd(() => { Meta.adGemUsed = (Meta.adGemUsed || 0) + 1; Meta.gems += AD_GEM_REWARD; Meta.save();
+    trkEarn('gems', AD_GEM_REWARD, 'ad_shop_gems'); trk('claim', { what: 'ad_gems', pay: 'ad', used_today: Meta.adGemUsed | 0 });
+    refreshShop(); refreshMenu(); }, null, 'shop_gems');
 }
 // spend gems for an instant power boost
 // instant gem upgrades — priced at the coin-grind they save (coin cost ÷ 80, the gem⇄coin
@@ -2605,16 +2835,18 @@ function heroBoostGems(){
 function castleGems(){ return Math.max(8, Math.round(Meta.castleCost() / 80)); }
 function gemUpgrade(kind){
   if (kind === 'weapon'){
-    const g = weaponBoostGems(); if (Meta.gems < g) return; let any = false;
+    const g = weaponBoostGems(); if (Meta.gems < g){ trkNoFunds('gem_boost_weapon', g, 'gems'); return; } let any = false;
     for (const id of Meta.weapons){ const lv = Meta.wlv[id - 1] || 1, nl = Math.min(WEAPON_MAX, lv + 3); if (nl > lv){ Meta.wlv[id - 1] = nl; any = true; } }
-    if (!any) return; Meta.gems -= g;
+    if (!any) return; Meta.gems -= g; trkUpgrade('gem_boost_weapon', 'equipped', 3, g, 'gems');
   } else if (kind === 'hero'){
-    const g = heroBoostGems(); if (Meta.gems < g) return; const h = HEROES[Meta.hero - 1] || HEROES[0];
+    const g = heroBoostGems(); if (Meta.gems < g){ trkNoFunds('gem_boost_hero', g, 'gems'); return; } const h = HEROES[Meta.hero - 1] || HEROES[0];
     if (h.tank){ const nl = Math.min(TANK_MAX, Meta.tankLvl + 3); if (nl <= Meta.tankLvl) return; Meta.tankLvl = nl; }
     else { const lv = Meta.heroLvl[h.id] || 1, nl = Math.min(HERO_LVL_MAX, lv + 3); if (nl <= lv) return; Meta.heroLvl[h.id] = nl; }
-    Meta.gems -= g;
+    Meta.gems -= g; trkUpgrade('gem_boost_hero', h.id, 3, g, 'gems');
   } else if (kind === 'castle'){
-    const g = castleGems(); if (Meta.gems < g || Meta.castle >= CASTLE_MAX) return; Meta.gems -= g; Meta.castle++;
+    const g = castleGems(); if (Meta.castle >= CASTLE_MAX) return;
+    if (Meta.gems < g){ trkNoFunds('gem_boost_castle', g, 'gems'); return; } Meta.gems -= g; Meta.castle++;
+    trkUpgrade('gem_boost_castle', 'stage', Meta.castle, g, 'gems');
   }
   Meta.save(); refreshShop(); refreshMenu();
 }
@@ -2636,7 +2868,7 @@ function buildFreeTab(body){
     owned: gemLeft <= 0, ownedLabel: 'BACK TOMORROW', priceHtml: `▶ +${AD_GEM_REWARD}`, onBuy: claimAdGems }));
   regenTickets();
   body.appendChild(shopCard({ icon: '🎫', name: 'FREE TICKET', desc: `Watch an ad for +1 play ticket (${Meta.pticket}/${PT_MAX})`, accent: '#7cd84e',
-    owned: Meta.pticket >= PT_MAX, ownedLabel: 'FULL', priceHtml: '▶ +1', onBuy: () => playRewardedAd(() => { grantTicket(1); refreshShop(); }) }));
+    owned: Meta.pticket >= PT_MAX, ownedLabel: 'FULL', priceHtml: '▶ +1', onBuy: () => playRewardedAd(() => { grantTicket(1); trk('claim', { what: 'ticket', pay: 'ad' }); refreshShop(); }, null, 'shop_ticket') }));
 }
 function buildPowerTab(body){
   // Heroes are EARNED by clearing levels — show the next one as a locked carrot (not for sale).
@@ -2648,14 +2880,19 @@ function buildPowerTab(body){
   const wMaxed = Meta.weapons.every(id => (Meta.wlv[id - 1] || 1) >= WEAPON_MAX);
   const hEq = HEROES[Meta.hero - 1] || HEROES[0];
   const hMaxed = hEq.tank ? Meta.tankLvl >= TANK_MAX : (Meta.heroLvl[hEq.id] || 1) >= HERO_LVL_MAX;
-  body.appendChild(shopCard({ icon: '🔫', name: 'WEAPON BOOST', desc: '+3 levels to your equipped weapons', accent: '#7cd84e', owned: wMaxed, ownedLabel: 'MAX', priceHtml: `${ICON_GEM}${weaponBoostGems()}`, afford: Meta.gems >= weaponBoostGems(), onBuy: () => gemUpgrade('weapon') }));
-  body.appendChild(shopCard({ icon: '🦸', name: 'HERO LEVELS', desc: '+3 levels to your hero', accent: '#7cd84e', owned: hMaxed, ownedLabel: 'MAX', priceHtml: `${ICON_GEM}${heroBoostGems()}`, afford: Meta.gems >= heroBoostGems(), onBuy: () => gemUpgrade('hero') }));
-  body.appendChild(shopCard({ icon: '🏰', name: 'CASTLE STAGE', desc: 'Instantly +1 castle stage', accent: '#7cd84e', owned: Meta.castle >= CASTLE_MAX, ownedLabel: 'MAX', priceHtml: `${ICON_GEM}${castleGems()}`, afford: Meta.gems >= castleGems(), onBuy: () => gemUpgrade('castle') }));
+  body.appendChild(shopCard({ icon: '🔫', name: 'WEAPON BOOST', desc: '+3 levels to your equipped weapons', accent: '#7cd84e', owned: wMaxed, ownedLabel: 'MAX', priceHtml: `${ICON_GEM}${weaponBoostGems()}`, afford: Meta.gems >= weaponBoostGems(),
+    wallItem: 'gem_boost_weapon', wallCost: weaponBoostGems(), wallCur: 'gems', onBuy: () => gemUpgrade('weapon') }));
+  body.appendChild(shopCard({ icon: '🦸', name: 'HERO LEVELS', desc: '+3 levels to your hero', accent: '#7cd84e', owned: hMaxed, ownedLabel: 'MAX', priceHtml: `${ICON_GEM}${heroBoostGems()}`, afford: Meta.gems >= heroBoostGems(),
+    wallItem: 'gem_boost_hero', wallCost: heroBoostGems(), wallCur: 'gems', onBuy: () => gemUpgrade('hero') }));
+  body.appendChild(shopCard({ icon: '🏰', name: 'CASTLE STAGE', desc: 'Instantly +1 castle stage', accent: '#7cd84e', owned: Meta.castle >= CASTLE_MAX, ownedLabel: 'MAX', priceHtml: `${ICON_GEM}${castleGems()}`, afford: Meta.gems >= castleGems(),
+    wallItem: 'gem_boost_castle', wallCost: castleGems(), wallCur: 'gems', onBuy: () => gemUpgrade('castle') }));
 }
 // ── IN-APP PURCHASES (real money · Google Play Billing via CdvPurchase) ──────────
-// Paste the product IDs you create in the Play Console into `id`. Until then, on Android these
-// buttons do nothing (never grant for free); in the browser build they simulate the grant so the
-// shop stays testable. The grant logic lives here (it owns Meta); iap.js only drives the store.
+// Paste the product IDs you create in the Play Console into `id`. On iOS, create products in
+// App Store Connect with EXACTLY the same ids (yes, including 'roads' — Play ids are immutable
+// once live, and one shared id per product keeps this catalog platform-agnostic). Until then,
+// on native these buttons do nothing (never grant for free); in the browser build they simulate
+// the grant so the shop stays testable. Grant logic lives here (it owns Meta); iap.js drives the store.
 const IAP = [
   { key: 'gems1', id: '100gems',   type: 'consumable',     gems: 100 },   // $1.99
   { key: 'gems2', id: '700gems',   type: 'consumable',     gems: 700 },   // $4.99
@@ -2664,22 +2901,56 @@ const IAP = [
   { key: 'noads', id: 'roads',     type: 'non-consumable', special: 'noads' },  // $4.99  ⚠️ verify this ID (looks like a typo for "noads")
   { key: 'starter', id: 'starterpack', type: 'non-consumable', special: 'starter' },  // $2.99 one-time: 500 💎 + 5000 coins
 ];
-function grantIap(pr){
+function grantIap(pr, tx){
   if (!pr) return;
+  Meta.iaps = (Meta.iaps | 0) + 1;
+  trk('iap', { product_id: String(pr.id || pr.key || ''), item_name: String(pr.key || ''),
+               special: String(pr.special || 'currency'), gems: pr.gems | 0, coins: pr.coins | 0 });
+  // GA4's STANDARD purchase event — with value + currency from the store it feeds the built-in
+  // revenue / LTV reports instead of a custom event nobody can chart. transaction_id dedups
+  // re-grants (non-consumables are re-granted on every launch by the restore pass in iap.js).
+  const info = (window.TDSIAP && TDSIAP.priceInfo) ? TDSIAP.priceInfo(pr.id) : null;
+  if (info && info.value > 0){
+    const txid = String((tx && (tx.transactionId || tx.id)) || (pr.id + '_' + Meta.iaps));
+    if (txid !== _lastTxId){
+      _lastTxId = txid;
+      trk('purchase', { transaction_id: txid, value: info.value, currency: info.currency || 'USD',
+                        items: [{ item_id: String(pr.id || ''), item_name: String(pr.key || ''), price: info.value, quantity: 1 }] });
+    }
+  }
+  trkPaywallClose();                                       // a completed purchase ends the paywall session
+  trkProfile();
   if (pr.special === 'mega'){
     showRewardModal({ icon: ICON_CHEST, accent: '#F4B731', title: 'MEGA CHEST', tag: 'JACKPOT', desc: 'Huge haul!', coins: randInt(6000, 11000), gems: randInt(40, 80), adDouble: false },
       () => { $('rewardModal').classList.remove('active'); refreshShop(); refreshMenu(); });
     return;
   }
-  if (pr.special === 'noads'){ Meta.noAds = true; Meta.gems += 300; }
+  // NO-ADS also kills the battle banner (and hands its screen space back).
+  if (pr.special === 'noads'){ Meta.noAds = true; Meta.gems += 300; try { if (window.AdBridge && AdBridge.banner) AdBridge.banner.refresh(); } catch (e) {} }
   else if (pr.special === 'starter'){ Meta.starterBought = true; Meta.gems += 500; Meta.coins += 5000; const sm = $('starterModal'); if (sm) sm.classList.remove('active'); }
   else { Meta.gems += (pr.gems || 0); Meta.coins += (pr.coins || 0); }
   buzz('success'); SFX.play('coin'); Meta.save(); refreshShop(); refreshMenu();
 }
-function buyIap(key){ if (window.TDSIAP) TDSIAP.buy(key).catch(() => {}); }   // grant happens via grantIap on success
+// `place` = which surface the tap came from, so failures can be attributed to a paywall.
+function buyIap(key, place){
+  const pr = IAP.find(p => p.key === key) || {};
+  const info = (window.TDSIAP && TDSIAP.priceInfo) ? TDSIAP.priceInfo(pr.id) : null;
+  if (_pw) _pw.buy = 1;                                    // this paywall got an attempted purchase
+  trk('purchase_start', { product_id: String(pr.id || key), item_name: String(key), place: place || (_pw ? _pw.place : 'unknown'),
+                          price: (info && info.price) || '', value: info ? info.value : 0, currency: (info && info.currency) || '' });
+  if (!window.TDSIAP){ trkPurchaseError('iap-unavailable', pr.id || key, place); return; }
+  // Errors were swallowed here (`.catch(() => {})`) — every failed payment was invisible.
+  TDSIAP.buy(key).catch(e => trkPurchaseError(e, pr.id || key, place));
+}
 // live localized price (e.g. "$1.99" / "€1,99") once the store loads, else the hard-coded fallback
 function iapPrice(key, fallback){ const pr = IAP.find(p => p.key === key); const live = pr && window.TDSIAP && TDSIAP.price(pr.id); return live || fallback; }
 if (window.TDSIAP) TDSIAP.configure(IAP, grantIap);
+// Store-side purchase errors (iap.js re-broadcasts them): classified into one event per class, so a
+// cancelled sheet, a declined card and a bad product id are separate lines in Firebase.
+document.addEventListener('tds-iap-error', e => {
+  const d = (e && e.detail) || {};
+  trkPurchaseError({ code: d.code, message: d.message }, d.productId);
+});
 
 function buildBoxesTab(body){
   body.appendChild(shopHead('Loot boxes'));
@@ -2688,46 +2959,65 @@ function buildBoxesTab(body){
   body.appendChild(grid);
   body.appendChild(shopHead('Mega deal'));
   body.appendChild(shopCard({ icon: ICON_CHEST, name: 'MEGA CHEST', desc: '6000–11000 coins + 40–80 gems', badge: 'BEST', accent: '#F4B731', priceHtml: iapPrice('mega', '$2.99'),
-    onBuy: () => buyIap('mega') }));
+    onBuy: () => buyIap('mega', 'shop_boxes') }));
 }
 function buildCoinsTab(body){
   body.appendChild(shopHead('Buy coins with 💎'));
   const packs = [ { name: 'POUCH OF COINS', coins: 1000, gems: 12 }, { name: 'BAG OF COINS', coins: 4000, gems: 40, badge: '+10%' }, { name: 'VAULT OF COINS', coins: 12000, gems: 100, badge: 'BEST' } ];
   for (const p of packs) body.appendChild(shopCard({ icon: ICON_COIN, name: p.name, desc: `${p.coins.toLocaleString()} coins`, badge: p.badge, accent: '#ffd24a', priceHtml: `${ICON_GEM}${p.gems}`,
-    afford: Meta.gems >= p.gems, onBuy: () => { if (Meta.gems < p.gems) return; Meta.gems -= p.gems; Meta.coins += p.coins; Meta.save(); refreshShop(); refreshMenu(); } }));
+    wallItem: 'coinpack:' + p.coins, wallCost: p.gems, wallCur: 'gems',
+    afford: Meta.gems >= p.gems, onBuy: () => { if (Meta.gems < p.gems){ trkNoFunds('coinpack:' + p.coins, p.gems, 'gems'); return; }
+      Meta.gems -= p.gems; Meta.coins += p.coins; Meta.save(); trkSpend('gems', p.gems, 'coinpack:' + p.coins); trkEarn('coins', p.coins, 'gem_coinpack'); refreshShop(); refreshMenu(); } }));
   body.appendChild(shopHead('Keep earning'));
   const active = Meta.boostUntil && Date.now() < Meta.boostUntil;
   body.appendChild(shopCard({ icon: '⚡', name: 'SPEED BOOST', desc: active ? boostLeftText() : '1.5× coins · 30 min', accent: '#7cd84e', owned: !!active, ownedLabel: 'ACTIVE', priceHtml: `${ICON_GEM}20`,
-    afford: Meta.gems >= 20, onBuy: () => { if (Meta.gems < 20) return; Meta.gems -= 20; Meta.boostUntil = Date.now() + 30 * 60 * 1000; Meta.save(); refreshShop(); refreshMenu(); } }));
+    wallItem: 'speed_boost', wallCost: 20, wallCur: 'gems',
+    afford: Meta.gems >= 20, onBuy: () => { if (Meta.gems < 20){ trkNoFunds('speed_boost', 20, 'gems'); return; }
+      Meta.gems -= 20; Meta.boostUntil = Date.now() + 30 * 60 * 1000; Meta.save(); trkSpend('gems', 20, 'speed_boost'); refreshShop(); refreshMenu(); } }));
   body.appendChild(shopCard({ icon: '🔋', name: 'ENERGY ×30', desc: `Next battle starts with +30 pts${Meta.energy ? ` (banked: +${Meta.energy})` : ''}`, accent: '#7cd84e', priceHtml: `${ICON_GEM}10`,
-    afford: Meta.gems >= 10, onBuy: () => { if (Meta.gems < 10) return; Meta.gems -= 10; Meta.energy = (Meta.energy || 0) + 30; Meta.save(); refreshShop(); refreshMenu(); } }));
+    wallItem: 'energy30', wallCost: 10, wallCur: 'gems',
+    afford: Meta.gems >= 10, onBuy: () => { if (Meta.gems < 10){ trkNoFunds('energy30', 10, 'gems'); return; }
+      Meta.gems -= 10; Meta.energy = (Meta.energy || 0) + 30; Meta.save(); trkSpend('gems', 10, 'energy30'); refreshShop(); refreshMenu(); } }));
 }
 function buildGemsTab(body){
   if (!Meta.starterBought){
     body.appendChild(shopHead('One-time offer'));
     body.appendChild(shopCard({ icon: '🎁', name: 'STARTER PACK', desc: '500 💎 + 5,000 coins · one time only', badge: '-80%', accent: '#ff7a45',
-      priceHtml: iapPrice('starter', '$2.99'), onBuy: () => buyIap('starter') }));
+      priceHtml: iapPrice('starter', '$2.99'), onBuy: () => buyIap('starter', 'shop_gems') }));
   }
   body.appendChild(shopHead('Get gems'));
   const packs = [ { name: 'PILE OF GEMS', gems: 100, price: '$1.99', key: 'gems1' }, { name: 'SACK OF GEMS', gems: 700, price: '$4.99', badge: '+100 BONUS', key: 'gems2' }, { name: 'CHEST OF GEMS', gems: 1600, price: '$9.99', badge: 'BEST VALUE', key: 'gems3' } ];
   for (const p of packs) body.appendChild(shopCard({ icon: '💎', name: p.name, desc: `${p.gems} gems`, badge: p.badge, accent: '#b15ce8', priceHtml: iapPrice(p.key, p.price),
-    onBuy: () => buyIap(p.key) }));
+    onBuy: () => buyIap(p.key, 'shop_gems') }));
   body.appendChild(shopHead('Specials'));
   body.appendChild(shopCard({ icon: '🚫', name: 'NO-ADS BUNDLE', desc: 'Remove forced ads + 300 💎', badge: 'VALUE', accent: '#ffd24a', owned: Meta.noAds, ownedLabel: 'OWNED', priceHtml: iapPrice('noads', '$4.99'),
-    onBuy: () => buyIap('noads') }));
+    onBuy: () => buyIap('noads', 'shop_gems') }));
   body.appendChild(shopCard({ icon: '🎟️', name: 'SKIP TICKETS ×3', desc: `Skip a level you’re stuck on (use on the defeat card)${Meta.tickets ? ` · you have ${Meta.tickets}` : ''}`, accent: '#b15ce8', priceHtml: `${ICON_GEM}60`,
-    afford: Meta.gems >= 60, onBuy: () => { if (Meta.gems < 60) return; Meta.gems -= 60; Meta.tickets = (Meta.tickets || 0) + 3; Meta.save(); refreshShop(); refreshMenu(); } }));
+    wallItem: 'skip_tickets3', wallCost: 60, wallCur: 'gems',
+    afford: Meta.gems >= 60, onBuy: () => { if (Meta.gems < 60){ trkNoFunds('skip_tickets3', 60, 'gems'); return; }
+      Meta.gems -= 60; Meta.tickets = (Meta.tickets || 0) + 3; Meta.save(); trkSpend('gems', 60, 'skip_tickets3'); refreshShop(); refreshMenu(); } }));
+  // App Store review requires a visible restore path for non-consumables (No-Ads, Starter Pack).
+  if (window.TDSIAP && TDSIAP.native){
+    const rb = document.createElement('button');
+    rb.textContent = '↻ Restore Purchases';
+    rb.style.cssText = 'display:block;margin:14px auto 6px;padding:8px 18px;background:none;border:none;color:#9fb7d8;font:inherit;font-size:14px;font-weight:700;text-decoration:underline;cursor:pointer;';
+    rb.onclick = () => { rb.textContent = 'Restoring…'; TDSIAP.restore().then(() => refreshShop()).catch(() => refreshShop()); };
+    body.appendChild(rb);
+  }
 }
 function refreshShop(){
   rollShopDay();
   $('sh_coins').textContent = Meta.coins; $('sh_gems').textContent = Meta.gems;
   document.querySelectorAll('.shtab').forEach(t => t.classList.toggle('cur', t.dataset.tab === shopTab));
   const body = $('shopBody'); if (!body) return; body.innerHTML = '';
-  if (shopTab === 'free') buildFreeTab(body);
-  else if (shopTab === 'boxes') buildBoxesTab(body);
-  else if (shopTab === 'coins') buildCoinsTab(body);
-  else if (shopTab === 'power') buildPowerTab(body);
-  else buildGemsTab(body);
+  if (shopTab === 'free'){ trkPaywallClose(); buildFreeTab(body); }   // ad tab — not a paywall
+  else {
+    trkPaywallOpen('shop_' + shopTab);
+    if (shopTab === 'boxes') buildBoxesTab(body);
+    else if (shopTab === 'coins') buildCoinsTab(body);
+    else if (shopTab === 'power') buildPowerTab(body);
+    else buildGemsTab(body);
+  }
 }
 
 /* ---------------- Levels ---------------- */
@@ -2925,6 +3215,8 @@ function claimMission(i){
   const m = missionsToday(), ms = currentMissions()[i];
   if (!ms || (m.prog[i] | 0) < ms.target || m.claimed[i]) return;
   m.claimed[i] = true; Meta.gems += ms.gems; SFX.play('coin'); Meta.save();
+  trk('claim', { what: 'mission', pay: 'free', slot: i, gems: ms.gems | 0 });
+  trkEarn('gems', ms.gems, 'mission');
   openMissions(); refreshMenu(); refreshMissionDot();
 }
 
@@ -2963,7 +3255,8 @@ function refreshWeapons(){
     wrap.appendChild(card);
   }
 }
-function buyWeapon(id){ const w = WEAPONS[id - 1]; if (!w || Meta.owned.includes(id) || Meta.coins < w.buy) return; Meta.coins -= w.buy; Meta.owned.push(id); Meta.save(); refreshWeapons(); refreshMenu(); }
+function buyWeapon(id){ const w = WEAPONS[id - 1]; if (!w || Meta.owned.includes(id)) return;
+  if (Meta.coins < w.buy){ trkNoFunds('weapon_buy:' + id, w.buy, 'coins'); return; } Meta.coins -= w.buy; Meta.owned.push(id); Meta.save(); trkUpgrade('weapon_unlock', id, 1, w.buy, 'coins'); refreshWeapons(); refreshMenu(); }
 function toggleWeapon(id){
   if (!Meta.owned.includes(id)) return;
   const i = Meta.weapons.indexOf(id);
@@ -2971,9 +3264,9 @@ function toggleWeapon(id){
   else { if (Meta.weapons.length >= weaponSlots()) Meta.weapons.shift(); Meta.weapons.push(id); }
   Meta.save(); refreshWeapons(); refreshMenu();
 }
-function upgradeWeaponId(id){ const lvl = Meta.wlv[id - 1] || 1; if (lvl >= WEAPON_MAX) return; const c = weaponCost(lvl); if (Meta.coins < c) return; Meta.coins -= c; Meta.wlv[id - 1] = lvl + 1; Meta.save(); refreshWeapons(); refreshMenu(); }
+function upgradeWeaponId(id){ const lvl = Meta.wlv[id - 1] || 1; if (lvl >= WEAPON_MAX) return; const c = weaponCost(lvl); if (Meta.coins < c){ trkNoFunds('weapon_upg:' + id, c, 'coins'); return; } Meta.coins -= c; Meta.wlv[id - 1] = lvl + 1; Meta.save(); trkUpgrade('weapon', id, lvl + 1, c, 'coins'); refreshWeapons(); refreshMenu(); }
 // FIRST weapon upgrade (Lv 1 → 2) can be earned with a rewarded ad
-function upgradeWeaponAd(id){ if ((Meta.wlv[id - 1] || 1) !== 1) return; playRewardedAd(() => { Meta.wlv[id - 1] = 2; Meta.save(); refreshWeapons(); refreshMenu(); }); }
+function upgradeWeaponAd(id){ if ((Meta.wlv[id - 1] || 1) !== 1){ trkAdClick('weapon_upgrade', 'already_done'); return; } playRewardedAd(() => { Meta.wlv[id - 1] = 2; Meta.save(); trkUpgrade('weapon', id, 2, 0, 'ad'); refreshWeapons(); refreshMenu(); }, null, 'weapon_upgrade'); }
 
 /* ---------------- Heroes (equip · upgrade) ---------------- */
 function refreshHeroes(){
@@ -3024,15 +3317,16 @@ function unlockHero(id, cur){
 }
 function upgradeHeroId(id){
   const h = HEROES.find(x => x.id === id); if (!h) return;
-  if (h.tank){ if (Meta.tankLvl >= TANK_MAX) return; const c = tankCost(Meta.tankLvl); if (Meta.coins < c) return; Meta.coins -= c; Meta.tankLvl++; }
-  else { const lvl = Meta.heroLvl[id] || 1; if (lvl >= HERO_LVL_MAX) return; const c = heroUpCost(lvl); if (Meta.coins < c) return; Meta.coins -= c; Meta.heroLvl[id] = lvl + 1; }
-  Meta.save(); refreshHeroes(); refreshMenu();
+  let cost = 0, newLvl = 0;
+  if (h.tank){ if (Meta.tankLvl >= TANK_MAX) return; const c = tankCost(Meta.tankLvl); if (Meta.coins < c){ trkNoFunds('tank_upg', c, 'coins'); return; } Meta.coins -= c; Meta.tankLvl++; cost = c; newLvl = Meta.tankLvl; }
+  else { const lvl = Meta.heroLvl[id] || 1; if (lvl >= HERO_LVL_MAX) return; const c = heroUpCost(lvl); if (Meta.coins < c){ trkNoFunds('hero_upg:' + id, c, 'coins'); return; } Meta.coins -= c; Meta.heroLvl[id] = lvl + 1; cost = c; newLvl = lvl + 1; }
+  Meta.save(); trkUpgrade(h.tank ? 'tank' : 'hero', id, newLvl, cost, 'coins'); refreshHeroes(); refreshMenu();
 }
 // FIRST hero upgrade (Lv 1 → 2 / tank tier 1 → 2) can be earned with a rewarded ad
 function upgradeHeroAd(id){
   const h = HEROES.find(x => x.id === id); if (!h || !heroOwned(id)) return;
-  if (heroLevel(h) !== 1) return;
-  playRewardedAd(() => { if (h.tank) Meta.tankLvl = 2; else Meta.heroLvl[id] = 2; Meta.save(); refreshHeroes(); refreshMenu(); });
+  if (heroLevel(h) !== 1){ trkAdClick('hero_upgrade', 'already_done'); return; }
+  playRewardedAd(() => { if (h.tank) Meta.tankLvl = 2; else Meta.heroLvl[id] = 2; Meta.save(); trkUpgrade(h.tank ? 'tank' : 'hero', id, 2, 0, 'ad'); refreshHeroes(); refreshMenu(); }, null, 'hero_upgrade');
 }
 
 /* ---------------- Forces screen (castle stats + special-force upgrades) ---------------- */
@@ -3093,22 +3387,23 @@ function refreshForces(){
     wrap.appendChild(card);
   }
 }
-function upgradeSF(id){ if (!sfOwned(id)) return; const lvl = sfLevel(id); if (lvl >= SF_MAX) return; const c = sfCost(lvl); if (Meta.coins < c) return; Meta.coins -= c; Meta.sfLvl[id] = lvl + 1; Meta.save(); refreshForces(); refreshMenu(); }
+function upgradeSF(id){ if (!sfOwned(id)) return; const lvl = sfLevel(id); if (lvl >= SF_MAX) return; const c = sfCost(lvl); if (Meta.coins < c){ trkNoFunds('force_upg:' + id, c, 'coins'); return; } Meta.coins -= c; Meta.sfLvl[id] = lvl + 1; Meta.save(); trkUpgrade('force', id, lvl + 1, c, 'coins'); refreshForces(); refreshMenu(); }
 function buySF(id){                                        // unlock a locked force with coins (cheap)
   if (sfOwned(id)) return;
-  const c = sfBuyCost(id); if (Meta.coins < c) return;
+  const c = sfBuyCost(id); if (Meta.coins < c){ trkNoFunds('force_buy:' + id, c, 'coins'); return; }
   Meta.coins -= c; Meta.sfOwned.push(id); Meta.sfLvl[id] = Meta.sfLvl[id] || 1;
-  SFX.play('coin'); Meta.save(); refreshForces(); refreshMenu();
+  SFX.play('coin'); Meta.save(); trkUpgrade('force_unlock', id, 1, c, 'coins'); refreshForces(); refreshMenu();
 }
 function upgradeSFAd(id){                                  // FIRST upgrade only (Lv 1→2) via a rewarded ad
-  if (!sfOwned(id) || sfLevel(id) !== 1) return;
-  playRewardedAd(() => { Meta.sfLvl[id] = 2; Meta.save(); refreshForces(); refreshMenu(); });
+  if (!sfOwned(id)) return;
+  if (sfLevel(id) !== 1){ trkAdClick('force_upgrade', 'already_done'); return; }
+  playRewardedAd(() => { Meta.sfLvl[id] = 2; Meta.save(); trkUpgrade('force', id, 2, 0, 'ad'); refreshForces(); refreshMenu(); }, null, 'force_upgrade');
 }
 
 /* ---------------- Menu castle + loadout ---------------- */
 let castleShown = -1;
 function renderCastle(){ const box = $('castleBox'); if (!box || !window.CastleArt) return; if (Meta.castle !== castleShown){ castleShown = Meta.castle; CastleArt.render(box, Meta.castle); } }
-function upgradeCastle(){ if (Meta.castle >= CASTLE_MAX) return; const c = Meta.castleCost(); if (Meta.coins < c) return; Meta.coins -= c; Meta.castle++; Meta.save(); renderCastle(); refreshMenu(); bump($('castleBox')); }
+function upgradeCastle(){ if (Meta.castle >= CASTLE_MAX) return; const c = Meta.castleCost(); if (Meta.coins < c){ trkNoFunds('castle_stage', c, 'coins'); return; } Meta.coins -= c; Meta.castle++; Meta.save(); trkUpgrade('castle', 'stage', Meta.castle, c, 'coins'); renderCastle(); refreshMenu(); bump($('castleBox')); }
 function refreshCastleUpg(){
   const btn = $('castleUpg'); if (!btn) return;
   $('castleStage').textContent = `Stage ${Meta.castle + 1} / ${CASTLE_MAX + 1}`;
@@ -3179,8 +3474,8 @@ $('streakDouble').addEventListener('click', streakDoubleAd);
 $('streakClose').addEventListener('click', closeStreak);
 $('castleUpg').addEventListener('click', upgradeCastle);
 { const b = $('castleUpgAd'); if (b) b.addEventListener('click', () => {   // first castle stage via rewarded ad
-    if (Meta.castle !== 0) return;
-    playRewardedAd(() => { Meta.castle = 1; Meta.save(); renderCastle(); refreshCastleUpg(); refreshMenu(); bump($('castleBox')); });
+    if (Meta.castle !== 0){ trkAdClick('castle_stage', 'already_done'); return; }
+    playRewardedAd(() => { Meta.castle = 1; Meta.save(); trkUpgrade('castle', 'stage', 1, 0, 'ad'); renderCastle(); refreshCastleUpg(); refreshMenu(); bump($('castleBox')); }, null, 'castle_stage');
   }); }
 $('loadWeapon').addEventListener('click', () => show('weapons'));
 $('loadHero').addEventListener('click', () => show('heroes'));
@@ -3191,20 +3486,22 @@ $('lc_heroUpg').addEventListener('click', e => { e.stopPropagation(); const h = 
 document.querySelectorAll('#forces .adfree[data-adact]').forEach(b => b.addEventListener('click', () => {
   const a = b.dataset.adact;
   const atBase = a === 'hp' ? Meta.hp === 1 : a === 'dmg' ? Meta.dmg === 1 : a === 'pow' ? Meta.pow === 1 : Meta.wagon === 0;
-  if (!atBase) return;
+  if (!atBase){ trkAdClick('stat_' + a, 'already_done'); return; }
   playRewardedAd(() => {
     if (a === 'hp') Meta.hp = 2; else if (a === 'dmg') Meta.dmg = 2; else if (a === 'pow') Meta.pow = 2; else Meta.wagon = 1;
-    Meta.save(); refreshForces(); refreshMenu();
-  });
+    Meta.save(); trkUpgrade('stat_' + a, a, a === 'wagon' ? 1 : 2, 0, 'ad'); refreshForces(); refreshMenu();
+  }, null, 'stat_' + a);
 }));
 document.querySelectorAll('#forces .upg[data-act]').forEach(b => b.addEventListener('click', () => {
   const a = b.dataset.act;
-  if (a === 'wagon'){ if (Meta.wagon >= WAGON_MAX) return; const c = Meta.wagonCost(); if (Meta.coins < c) return; Meta.coins -= c; Meta.wagon++; Meta.save(); refreshForces(); refreshMenu(); return; }
+  if (a === 'wagon'){ if (Meta.wagon >= WAGON_MAX) return; const c = Meta.wagonCost(); if (Meta.coins < c){ trkNoFunds('stat_wagon', c, 'coins'); return; } Meta.coins -= c; Meta.wagon++; Meta.save(); trkUpgrade('stat_wagon', 'wagon', Meta.wagon, c, 'coins'); refreshForces(); refreshMenu(); return; }
   const cost = a === 'hp' ? Meta.hpCost() : a === 'dmg' ? Meta.dmgCost() : Meta.powCost();
-  if (Meta.coins < cost) return;
+  if (Meta.coins < cost){ trkNoFunds('stat_' + a, cost, 'coins'); return; }
   Meta.coins -= cost;
   if (a === 'hp') Meta.hp++; else if (a === 'dmg') Meta.dmg++; else Meta.pow++;
-  Meta.save(); refreshForces(); refreshMenu();
+  Meta.save();
+  trkUpgrade('stat_' + a, a, (a === 'hp' ? Meta.hp : a === 'dmg' ? Meta.dmg : Meta.pow), cost, 'coins');
+  refreshForces(); refreshMenu();
 }));
 
 $('sndBtn').addEventListener('click', toggleSound);
@@ -3217,7 +3514,17 @@ $('sndBtn2').addEventListener('click', toggleSound);
 // The buttons stay hidden until sign-in fires 'tds-games-ready' (never shown on web).
 { const lb = $('btnLeaderboard'), ac = $('btnAchievements'), gb = $('gamesBtns');
   if (lb) lb.addEventListener('click', openLeaderboard);                      // Firestore global leaderboard
-  if (ac){ ac.addEventListener('click', () => window.TDSGames && TDSGames.showAchievements()); ac.style.display = 'none'; }
+  // Achievements: shown whenever a games platform exists (PGS / Game Center). If the player isn't
+  // signed in — including the case where they declined the one-time launch prompt — tapping it is
+  // the explicit gesture that runs the interactive sign-in. Nothing prompts on its own.
+  if (ac){
+    ac.addEventListener('click', () => {
+      const G = window.TDSGames; if (!G) return;
+      if (G.ready) return G.showAchievements();
+      if (G.signIn) G.signIn().then(ok => { if (ok) G.showAchievements(); });
+    });
+    ac.style.display = (window.TDSGames && TDSGames.available) ? '' : 'none';
+  }
   const showGames = () => { if (gb) gb.style.display = ''; };
   // show the 🏆 button once the leaderboard backend (Firebase) is ready, or when PGS signs in
   if (window.TDSLeaderboard && TDSLeaderboard.ready) showGames();
@@ -3229,8 +3536,8 @@ $('sndBtn2').addEventListener('click', toggleSound);
   const tab = $('lbTabAll');   if (tab) tab.addEventListener('click', () => { lbTab = 'all'; renderLb(); });
   const mcl = $('monthClaim'); if (mcl) mcl.addEventListener('click', () => $('monthModal').classList.remove('active'));
   // starter pack offer popup
-  const spb = $('starterBuy');   if (spb) spb.addEventListener('click', () => { $('starterModal').classList.remove('active'); buyIap('starter'); });
-  const spl = $('starterLater'); if (spl) spl.addEventListener('click', () => $('starterModal').classList.remove('active'));
+  const spb = $('starterBuy');   if (spb) spb.addEventListener('click', () => { $('starterModal').classList.remove('active'); buyIap('starter', 'starter_popup'); });
+  const spl = $('starterLater'); if (spl) spl.addEventListener('click', () => { $('starterModal').classList.remove('active'); trkPaywallClose(); });
 }
 // settle last week's + month's contest prizes shortly after boot (the cloud identity arrives async)
 setTimeout(checkMonthReward, 6000); setTimeout(checkMonthReward, 30000);
@@ -3240,7 +3547,7 @@ function maybeOfferStarter(){
   if (Meta.starterBought || Meta.starterSeen || (Meta.unlocked | 0) < 3) return;   // offered once, after level 3
   if (state.screen !== 'menu' || document.querySelector('.modal.active')) return;  // never stack over another popup
   Meta.starterSeen = true; Meta.save();
-  const m = $('starterModal'); if (m) m.classList.add('active');
+  const m = $('starterModal'); if (m){ m.classList.add('active'); trkPaywallOpen('starter_popup'); }
 }
 
 /* ---------------- Local notifications (Android come-back reminders) ----------------
@@ -3303,6 +3610,7 @@ $('pauseMenuBtn').addEventListener('click', () => { state.paused = false; $('pau
 // Victory / Defeat result cards
 $('vicDouble').addEventListener('click', () => doubleReward('vic'));
 $('vicContinue').addEventListener('click', () => proceed('menu'));
+$('defRevive').addEventListener('click', defeatRevive);
 $('defDouble').addEventListener('click', defeatDouble);
 $('defRetry').addEventListener('click', () => { finalizeDefeat(); proceed('retry'); });
 $('defSkip').addEventListener('click', skipLevel);
@@ -3375,7 +3683,10 @@ resize();
 buildLevels();
 preload(() => {
   show('menu');
-  if (location.hash === '#play') startRun();
+  trkProfile();                                            // user properties for segmentation, once per launch
+  // brand-new player (never played a battle, nothing cleared) → skip the menu and drop straight into level 1
+  if (!location.hash && !(Meta.games | 0) && !Meta.stars[1]) startRun();
+  else if (location.hash === '#play') startRun();
   else if (location.hash === '#shop') show('shop');
   else if (location.hash === '#levels') show('levels');
   else if (location.hash === '#weapons') show('weapons');
