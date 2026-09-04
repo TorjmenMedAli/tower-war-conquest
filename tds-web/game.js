@@ -751,16 +751,16 @@ function shade(hex, amt){
 }
 let menuStars = null;
 function drawMenuBg(){
-  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#bfe58c'); g.addColorStop(0.6, '#8ccb5c'); g.addColorStop(1, '#5d9c3a');
+  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b3a6b'); g.addColorStop(0.6, '#0f2547'); g.addColorStop(1, '#0a1730');
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   if (!menuStars){ menuStars = []; for (let i = 0; i < 70; i++) menuStars.push({ x: Math.random(), y: Math.random() * 0.6, r: 0.6 + Math.random() * 1.6, p: Math.random() * 6.28 }); }
   for (const s of menuStars){ ctx.globalAlpha = 0.45 + 0.45 * Math.sin(state.t * 1.6 + s.p); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, 6.283); ctx.fill(); }
   ctx.globalAlpha = 1;
   // rolling hills silhouette
-  ctx.fillStyle = '#79bb4d'; ctx.beginPath(); ctx.moveTo(0, H * 0.62);
+  ctx.fillStyle = '#14305a'; ctx.beginPath(); ctx.moveTo(0, H * 0.62);
   for (let x = 0; x <= W; x += 12) ctx.lineTo(x, H * 0.62 + Math.sin(x / 70 + 1) * 14 + Math.sin(x / 31) * 6);
   ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = '#68a840'; ctx.beginPath(); ctx.moveTo(0, H * 0.7);
+  ctx.fillStyle = '#0f2648'; ctx.beginPath(); ctx.moveTo(0, H * 0.7);
   for (let x = 0; x <= W; x += 12) ctx.lineTo(x, H * 0.7 + Math.sin(x / 50 + 3) * 12);
   ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
 }
