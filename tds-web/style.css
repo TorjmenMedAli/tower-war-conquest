@@ -64,6 +64,12 @@ body {
 /* the battle HUD keeps a small cushion above the system navigation buttons (same as the menu);
    the safe-area inset is applied ONCE, here — the box itself uses plain fixed padding */
 #game.screen { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+/* The battle screen is a full-bleed overlay on top of the canvas. Without this it would
+   swallow every pointer event over the battlefield, so swipes and taps on towers never
+   reached the canvas. Let the screen itself be transparent to input and re-enable it on
+   the two HUD bars (the FTUE hint stays non-interactive). */
+#game.screen { pointer-events: none; }
+#game.screen > .hud-top, #game.screen > .hud-bottom { pointer-events: auto; }
 .screen.active { display: flex; animation: screenIn .34s cubic-bezier(.22,.9,.3,1) both; }
 @keyframes screenIn { from { opacity: 0; transform: translateY(10px) scale(.992); } to { opacity: 1; transform: none; } }
 

@@ -356,7 +356,7 @@ function genGates(rnd, towers, river){
 }
 
 /* ---- live run ---- */
-const state = { screen: 'menu', t: 0, level: 1, mode: 'campaign', paused: false, over: false, won: false, speed: 1,
+const state = { screen: 'menu', down: null, t: 0, level: 1, mode: 'campaign', paused: false, over: false, won: false, speed: 1,
   towers: [], units: [], walls: [], mines: [], river: null, gates: [], bridges: {}, shots: [], fx: [], pops: [],
   drag: null, swipe: null, aim: false, time: 0, kills: 0, sent: 0, caps: 0, score: 0, boost: 1, ai: [], hint: '', hintT: 0 };
 const strength = owner => owner === 1 ? state.pStr : owner === 0 ? 1 : state.eStr;
@@ -399,6 +399,39 @@ function addRoute(from, to, silent){
   from.routes.push({ to: to.id, acc: 0 });
   if (from.owner === 1){ SFX.play('deploy'); if (!(Meta.ftue & 2)){ Meta.ftue |= 2; Meta.save(); const fs = $('ftueSwipe'); if (fs) fs.style.display = 'none'; } }
   return true;
+}
+/* A tap on a tower is shorthand for "send troops there from my closest tower that can
+   reach it". Swiping is still the precise control; this makes single clicks work too,
+   and — just as importantly — it always says WHY when it can't comply. */
+function tapTarget(p){
+  const t = towerAt(p.x, p.y, 26);
+  if (!t) return;
+  if (t.owner === 1 && BREEDS[t.type]){ hint('Swipe from this tower to a target'); pop(t.x, t.y - 46, 'SWIPE TO ATTACK', '#ffd24a'); return; }
+
+  let best = null, bd = 1e9, sawReach = false, sawSlot = false, sawDup = false;
+  for (const src of state.towers){
+    if (src.owner !== 1 || !BREEDS[src.type] || src === t) continue;
+    if (Math.hypot(src.x - t.x, src.y - t.y) > REACH){ sawReach = true; continue; }
+    if (src.routes.some(r => r.to === t.id)){ sawDup = true; continue; }
+    if (src.routes.length >= maxRoutes(src.lv)){ sawSlot = true; continue; }
+    const d = Math.hypot(src.x - t.x, src.y - t.y);
+    if (d < bd){ bd = d; best = src; }
+  }
+  if (best){
+    if (addRoute(best, t)){
+      // trace the new supply line so it is obvious which tower answered the tap
+      ring(best.x, best.y, OWNER_COL[1], 6, 46, 0.4, 3);
+      ring(t.x, t.y, OWNER_COL[1], 6, 52, 0.45, 3);
+      pop(t.x, t.y - 46, 'ATTACK!', '#8fe388');
+    }
+    return;
+  }
+  // nothing could be sent — explain the actual reason
+  if (sawDup) hint('Already sending troops there');
+  else if (sawSlot) hint('No free route — cut a line or level up a tower');
+  else if (sawReach) hint('Too far — capture a closer tower first');
+  else hint('You need a tower of your own first');
+  pop(t.x, t.y - 46, 'CANT REACH', '#ff8a78');
 }
 function cutRoute(from, idx){ from.routes.splice(idx, 1); if (from.owner === 1) SFX.play('click'); }
 function hint(txt){ state.hint = txt; state.hintT = 2.2; const h = $('hudHint'); if (h){ h.textContent = txt; h.classList.add('warn'); } }
@@ -644,8 +677,9 @@ function bindInput(){
   const pos = e => { const r = el.getBoundingClientRect(); return toMap(e.clientX - r.left, e.clientY - r.top); };
   el.addEventListener('pointerdown', e => {
     if (state.screen !== 'game' || state.paused || state.over) return;
-    const p = pos(e); const t = towerAt(p.x, p.y, 16);
+    const p = pos(e); const t = towerAt(p.x, p.y, 26);
     if (state.aim){ if (t && t.owner >= 2) airStrike(t); else hint('Tap an ENEMY tower to strike'); return; }
+    state.down = { x: p.x, y: p.y };
     if (t && t.owner === 1 && BREEDS[t.type]) state.drag = { from: t, x: p.x, y: p.y };
     else state.swipe = [p];
     try { el.setPointerCapture(e.pointerId); } catch (err) {}
@@ -668,8 +702,15 @@ function bindInput(){
     }
   });
   const up = e => {
-    if (state.drag){ const p = pos(e); const t = towerAt(p.x, p.y, 22); if (t && t !== state.drag.from) addRoute(state.drag.from, t); state.drag = null; }
-    state.swipe = null;
+    const p = pos(e);
+    const moved = state.down ? Math.hypot(p.x - state.down.x, p.y - state.down.y) : 999;
+    if (state.drag){
+      const t = towerAt(p.x, p.y, 26);
+      if (t && t !== state.drag.from) addRoute(state.drag.from, t);
+      else if (moved < 14) tapTarget(p);          // tapped your own tower and let go → treat as a tap
+      state.drag = null;
+    } else if (moved < 14) tapTarget(p);          // plain tap anywhere else
+    state.swipe = null; state.down = null;
   };
   el.addEventListener('pointerup', up); el.addEventListener('pointercancel', up);
 }
