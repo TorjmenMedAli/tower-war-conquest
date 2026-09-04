@@ -888,8 +888,12 @@ function drawTowerArt(t, p, s){
   ctx.save(); ctx.translate(p.x, p.y);
 
   /* --- ground pad: soft drop shadow, team disc with a bevel, animated rim for owned towers --- */
-  ctx.save(); ctx.globalAlpha = 0.28; ctx.fillStyle = '#000'; ctx.filter = 'blur(' + (5 * s).toFixed(1) + 'px)';
-  ctx.beginPath(); ctx.ellipse(0, R * 0.46, R * 1.05, R * 0.62, 0, 0, 6.283); ctx.fill(); ctx.restore();
+  ctx.save(); ctx.globalAlpha = 0.26; ctx.fillStyle = '#000'; ctx.filter = 'blur(' + (7 * s).toFixed(1) + 'px)';
+  // thrown down-right, away from the key light, and long enough to say the sun is low
+  ctx.translate(R * 0.34, R * 0.5); ctx.rotate(0.42);
+  ctx.beginPath(); ctx.ellipse(0, 0, R * 1.35, R * 0.5, 0, 0, 6.283); ctx.fill(); ctx.restore();
+  ctx.save(); ctx.globalAlpha = 0.24; ctx.fillStyle = '#000'; ctx.filter = 'blur(' + (4 * s).toFixed(1) + 'px)';
+  ctx.beginPath(); ctx.ellipse(0, R * 0.42, R * 0.9, R * 0.5, 0, 0, 6.283); ctx.fill(); ctx.restore();
 
   const padCol = owned ? col : '#b8c0c8';
   const pg = ctx.createRadialGradient(0, R * 0.30, R * 0.15, 0, R * 0.36, R);
@@ -924,21 +928,25 @@ function drawTowerArt(t, p, s){
   ctx.translate(-Math.cos(t.kickA || 0) * kick * 7 * s, -idle - Math.sin(t.kickA || 0) * kick * 7 * s);
   ctx.scale(sx, sy);
   const im = spr(`tower_${t.type}${tier}_${OWNER_KEY[t.owner]}`);
-  const bw = (fort ? 330 : 230) * s;
+  const bw = (fort ? 380 : 265) * s;
+  const bhh = bw * TOWER_RISE;                      // stretched height
+  // keep the ground contact exactly where it used to be, then grow the building upward from it
+  const baseY = (TOWER_BASE - 0.58) * (fort ? 330 : 230) * s;
+  const by0 = baseY - TOWER_BASE * bhh;
   if (im){
     // grounded contact shadow beneath the sprite
     ctx.save(); ctx.globalAlpha = 0.2; ctx.fillStyle = '#000'; ctx.filter = 'blur(' + (3 * s).toFixed(1) + 'px)';
     ctx.beginPath(); ctx.ellipse(0, R * 0.22, R * 0.7, R * 0.26, 0, 0, 6.283); ctx.fill(); ctx.restore();
-    ctx.drawImage(im, -bw / 2, -bw * 0.58, bw, bw);
+    ctx.drawImage(im, -bw / 2, by0, bw, bhh);
   } else { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.283); ctx.fill(); }
 
   /* additive bloom on level-up / capture, masked to the sprite so it reads as the tower lighting up */
   const bloom = Math.max(glow, Math.min(1, t.flash > 0 ? t.flash : 0));
   if (bloom > 0.01 && im){
     ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.min(0.75, bloom * 0.8);
-    ctx.drawImage(im, -bw / 2, -bw * 0.58, bw, bw);
+    ctx.drawImage(im, -bw / 2, by0, bw, bhh);
     ctx.globalAlpha = Math.min(0.5, bloom * 0.5); ctx.filter = 'blur(' + (6 * s).toFixed(1) + 'px)';
-    ctx.drawImage(im, -bw / 2, -bw * 0.58, bw, bw);
+    ctx.drawImage(im, -bw / 2, by0, bw, bhh);
     ctx.restore();
   }
   ctx.restore();
@@ -1022,6 +1030,13 @@ function drawTowerArt(t, p, s){
   if (owned && BREEDS[t.type]){ const n = maxRoutes(t.lv), used = t.routes.length; for (let i = 0; i < n; i++){ const x = (i - (n - 1) / 2) * 11 * s; ctx.beginPath(); ctx.arc(x, by + 21 * s, 4 * s, 0, 6.283); ctx.fillStyle = i < n - used ? '#fff' : 'rgba(255,255,255,.3)'; ctx.fill(); ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 1.5 * s; ctx.stroke(); } }
   ctx.restore();
 }
+/* The tower sprites were rendered from a steep, near-overhead camera, so the buildings read
+   as roofs rather than as structures facing the player. Every tower sprite has its ground
+   contact at the same height in the frame (measured: 77% down the 256px image), so stretching
+   each one vertically about that point — feet stay planted — restores the look of a lower,
+   more head-on camera without re-rendering the art. */
+const TOWER_BASE = 0.77;      // where the building meets the ground, as a fraction of the sprite
+const TOWER_RISE = 1.22;      // vertical stretch applied about that contact point
 const SPRITE_FWD = { tank: 3 * Math.PI / 4, soldier: -Math.PI / 4 };   // rendered facing: tanks +z (down-left), soldiers −z (up-right)
 function drawUnit(u, s){
   const p = toScr(u.x, u.y), a = state.towers[u.from], b = state.towers[u.to];
