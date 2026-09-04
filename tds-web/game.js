@@ -895,12 +895,25 @@ function drawTowerArt(t, p, s){
   ctx.save(); ctx.globalAlpha = 0.24; ctx.fillStyle = '#000'; ctx.filter = 'blur(' + (4 * s).toFixed(1) + 'px)';
   ctx.beginPath(); ctx.ellipse(0, R * 0.42, R * 0.9, R * 0.5, 0, 0, 6.283); ctx.fill(); ctx.restore();
 
+  /* A built plinth rather than a flat coloured disc: a stone ring, a team-coloured deck
+     inside it, a bevel highlight and rivets around the rim. It gives every tower a footing
+     and is where the team colour actually reads on the board. */
   const padCol = owned ? col : '#b8c0c8';
-  const pg = ctx.createRadialGradient(0, R * 0.30, R * 0.15, 0, R * 0.36, R);
-  pg.addColorStop(0, shade(padCol, 0.35)); pg.addColorStop(0.65, padCol); pg.addColorStop(1, shade(padCol, -0.3));
-  ctx.globalAlpha = 0.7; ctx.fillStyle = pg;
-  ctx.beginPath(); ctx.ellipse(0, R * 0.36, R * 0.98, R * 0.58, 0, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1;
-  ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 2 * s; ctx.stroke();
+  // outer stone ring
+  ctx.fillStyle = owned ? shade(OWNER_DARK[t.owner], -0.35) : '#6d757e';
+  ctx.beginPath(); ctx.ellipse(0, R * 0.38, R * 1.10, R * 0.66, 0, 0, 6.283); ctx.fill();
+  ctx.fillStyle = owned ? shade(OWNER_DARK[t.owner], -0.1) : '#848d97';
+  ctx.beginPath(); ctx.ellipse(0, R * 0.34, R * 1.10, R * 0.66, 0, 0, 6.283); ctx.fill();
+  // team deck
+  const pg = ctx.createRadialGradient(0, R * 0.24, R * 0.12, 0, R * 0.34, R * 0.95);
+  pg.addColorStop(0, shade(padCol, 0.42)); pg.addColorStop(0.62, padCol); pg.addColorStop(1, shade(padCol, -0.26));
+  ctx.fillStyle = pg;
+  ctx.beginPath(); ctx.ellipse(0, R * 0.34, R * 0.88, R * 0.52, 0, 0, 6.283); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 1.6 * s; ctx.stroke();
+  // rivets around the stone rim
+  ctx.fillStyle = 'rgba(255,255,255,.35)';
+  for (let i = 0; i < 10; i++){ const a = i * 0.6283 + 0.31;
+    ctx.beginPath(); ctx.arc(Math.cos(a) * R * 0.99, R * 0.34 + Math.sin(a) * R * 0.59, 1.6 * s, 0, 6.283); ctx.fill(); }
 
   /* --- tier aura: a slow rotating halo that makes upgrade state readable at a glance --- */
   if (owned && tier >= 2){
@@ -962,6 +975,28 @@ function drawTowerArt(t, p, s){
     // three-pronged star flare
     ctx.fillStyle = '#fff6d5';
     for (const an of [0, 2.1, -2.1]){ ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(an) * 20 * s, Math.sin(an) * 20 * s - 2 * s); ctx.lineTo(Math.cos(an) * 20 * s, Math.sin(an) * 20 * s + 2 * s); ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+  }
+
+  /* --- team pennant: a pole and a flag that ripples, the clearest ownership cue on the map --- */
+  if (owned){
+    const px = -R * 1.16, py = -R * 0.22, ph = R * 1.55;
+    ctx.save(); ctx.translate(px, py);
+    ctx.strokeStyle = '#5d4a33'; ctx.lineWidth = 2.6 * s; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -ph); ctx.stroke();
+    ctx.fillStyle = '#e8c46a'; ctx.beginPath(); ctx.arc(0, -ph - 2 * s, 2.6 * s, 0, 6.283); ctx.fill();
+    const w = R * 0.72, h = R * 0.40, wave = Math.sin(state.t * 3 + t.id) * 0.16;
+    const fg = ctx.createLinearGradient(0, 0, w, 0);
+    fg.addColorStop(0, shade(col, 0.22)); fg.addColorStop(1, shade(col, -0.18));
+    ctx.fillStyle = fg;
+    ctx.beginPath(); ctx.moveTo(0, -ph + 1 * s);
+    ctx.quadraticCurveTo(w * 0.5, -ph + h * (0.1 + wave), w, -ph + h * 0.18);
+    ctx.lineTo(w, -ph + h * 1.0);
+    ctx.quadraticCurveTo(w * 0.5, -ph + h * (0.92 - wave), 0, -ph + h * 0.95);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.45)'; ctx.lineWidth = 1.4 * s; ctx.stroke();
+    if (tier >= 2){ ctx.fillStyle = tier >= 3 ? '#ffd85e' : '#dff2ff';
+      ctx.beginPath(); ctx.arc(w * 0.52, -ph + h * 0.55, 3.2 * s, 0, 6.283); ctx.fill(); }
     ctx.restore();
   }
 

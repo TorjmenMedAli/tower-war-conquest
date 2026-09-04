@@ -1,0 +1,224 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>render-units</title>
+<style>html,body{margin:0;background:#333;color:#eee;font:12px monospace}#out{display:grid;grid-template-columns:repeat(10,128px)}#out canvas{width:128px;height:128px}</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"}}</script>
+</head><body><div id="out"></div>
+<script type="module">
+import * as THREE from 'three';
+window.addEventListener('error', e => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', e => { document.title = 'ERR ' + (e.reason && e.reason.message || e.reason); });
+
+/* ============================================================================================
+   Infantry and armour, rebuilt from three.js primitives.
+   The previous models were a capsule with a sphere on top. These are proper chunky
+   mobile-game figures: a readable silhouette, real gear, and materials that separate cloth
+   from metal from skin. Facing conventions are unchanged (soldiers end up facing -z, tanks
+   +z) so the SPRITE_FWD rotation compensation in game.js still holds.
+   ============================================================================================ */
+const SZ = 512;                                   // rendered large, downsampled to 256 for clean AA
+const OUT = 256;
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+renderer.setSize(SZ, SZ); renderer.setClearColor(0x000000, 0); renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.02;
+
+const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 100);
+function setCam(half, cy, low){
+  cam.left = -half; cam.right = half; cam.top = half; cam.bottom = -half;
+  if (low) cam.position.set(-2.6, 2.4, 4.6); else cam.position.set(3.2, 7.5, 3.2);
+  cam.lookAt(0, cy, 0); cam.updateProjectionMatrix();
+}
+
+/* ---- palette ---------------------------------------------------------------------------- */
+const TEAM  = { p: 0x3d8ae8, r: 0xe8483d, y: 0xf2a52b, v: 0xa259e8 };
+const SKIN  = 0xf1c08a, SKIN_S = 0xd39a63;
+const GEAR  = 0x39414d, GEAR_D = 0x232932, STEEL = 0x8d97a5, GOLD = 0xffc93c;
+const mix = (a, b, t) => new THREE.Color(a).lerp(new THREE.Color(b), t).getHex();
+
+const mat = (c, r, m) => new THREE.MeshStandardMaterial({ color: c, roughness: r == null ? 0.72 : r, metalness: m == null ? 0.04 : m });
+const add = (g, geo, m, x, y, z, rx, ry, rz, sx, sy, sz) => {
+  const o = new THREE.Mesh(geo, m);
+  o.position.set(x || 0, y || 0, z || 0);
+  o.rotation.set(rx || 0, ry || 0, rz || 0);
+  if (sx != null) o.scale.set(sx, sy == null ? sx : sy, sz == null ? sx : sz);
+  g.add(o); return o;
+};
+const BOX = (w,h,d) => new THREE.BoxGeometry(w,h,d);
+const CYL = (rt,rb,h,s) => new THREE.CylinderGeometry(rt,rb,h,s||16);
+const SPH = (r,a,b) => new THREE.SphereGeometry(r,a||18,b||14);
+const CAP = (r,l) => new THREE.CapsuleGeometry(r,l,6,16);
+
+/* ---- infantry ---------------------------------------------------------------------------- */
+function soldier(team, tier){
+  const g = new THREE.Group();
+  const C = TEAM[team], CD = mix(C, 0x000000, 0.38), CL = mix(C, 0xffffff, 0.26);
+  const cloth = mat(C, 0.82), clothD = mat(CD, 0.8), clothL = mat(CL, 0.78);
+  const gear = mat(GEAR, 0.66, 0.16), gearD = mat(GEAR_D, 0.6, 0.2);
+  const steel = mat(STEEL, 0.36, 0.75), gold = mat(GOLD, 0.32, 0.7);
+  const skin = mat(SKIN, 0.86), skinS = mat(SKIN_S, 0.86);
+
+  // boots and legs
+  for (const s of [-1, 1]){
+    add(g, CAP(0.090, 0.18), clothD, s * 0.125, 0.25, -0.01);
+    const boot = add(g, BOX(0.185, 0.12, 0.25), gearD, s * 0.125, 0.072, 0.005);
+
+    add(g, BOX(0.19, 0.04, 0.255), mat(0x171c22, 0.9), s * 0.125, 0.025, 0.005);
+  }
+  // hips and belt
+  add(g, BOX(0.36, 0.13, 0.24), clothD, 0, 0.40, 0);
+  add(g, BOX(0.40, 0.07, 0.27), gearD, 0, 0.44, 0);
+  add(g, BOX(0.08, 0.09, 0.05), tier >= 4 ? gold : steel, 0, 0.44, 0.145);
+
+  // torso: tapered, with a chest rig
+  add(g, CAP(0.235, 0.20), cloth, 0, 0.63, 0);
+  add(g, BOX(0.40, 0.30, 0.30), clothD, 0, 0.63, 0, 0, 0, 0, 1, 1, 1).visible = false;
+  const vest = add(g, BOX(0.42, 0.32, 0.30), tier >= 1 ? gearD : clothD, 0, 0.64, 0.01);
+  vest.scale.set(1, 1, 0.92);
+  // pouches
+  for (const s of [-1, 1]) add(g, BOX(0.11, 0.11, 0.06), gear, s * 0.11, 0.55, 0.155);
+  if (tier >= 1) add(g, BOX(0.30, 0.06, 0.04), tier >= 4 ? gold : steel, 0, 0.72, 0.16);
+
+  // shoulders and arms — both hands on the rifle, held across the chest
+  for (const s of [-1, 1]){ add(g, SPH(0.135), cloth, s * 0.255, 0.725, 0);
+    if (tier >= 1) add(g, BOX(0.16, 0.07, 0.24), tier >= 4 ? gold : clothD, s * 0.265, 0.775, 0); }
+  add(g, CAP(0.075, 0.16), cloth, -0.22, 0.60, 0.10, 0.5, 0, 0.25);
+  add(g, CAP(0.075, 0.20), cloth, 0.20, 0.60, 0.16, 0.9, 0, -0.2);
+  for (const s of [-1, 1]) add(g, SPH(0.052), skin, s * 0.135, 0.555, 0.285);
+
+  // neck and head — kept small, because the battle camera looks almost straight down
+  add(g, CYL(0.080, 0.090, 0.09), skinS, 0, 0.80, 0);
+  add(g, SPH(0.155), skin, 0, 0.92, 0);
+  add(g, BOX(0.11, 0.05, 0.03), skinS, 0, 0.865, 0.145);          // jaw shadow
+  for (const s of [-1, 1]) add(g, SPH(0.026), mat(0x1a2230, 0.5), s * 0.060, 0.935, 0.135);
+  if (tier >= 2){                                                 // goggles
+    add(g, BOX(0.25, 0.065, 0.06), gearD, 0, 0.945, 0.118);
+    add(g, BOX(0.20, 0.04, 0.03), mat(0x7fe0ff, 0.2, 0.6), 0, 0.945, 0.145);
+  }
+  // helmet: dome + brim + band
+  const dome = add(g, new THREE.SphereGeometry(0.178, 20, 14, 0, Math.PI * 2, 0, Math.PI * 0.55), tier >= 4 ? gold : clothD, 0, 0.965, 0);
+  dome.scale.set(1, 0.92, 1.06);
+  add(g, CYL(0.198, 0.208, 0.04), tier >= 4 ? gold : clothD, 0, 0.965, 0);
+  add(g, CYL(0.190, 0.190, 0.028), gearD, 0, 0.940, 0);
+  // a stripe across the crown, the one tier cue that is legible from straight above
+  add(g, BOX(0.055, 0.03, 0.36), tier >= 4 ? mat(0xb4302a, 0.8) : tier >= 2 ? clothL : gearD, 0, 1.038, 0);
+  if (tier >= 2) add(g, BOX(0.25, 0.028, 0.11), tier >= 4 ? gold : clothD, 0, 0.958, 0.135);  // peak
+  if (tier >= 3) add(g, BOX(0.045, 0.05, 0.20), gearD, 0.135, 1.005, 0);                      // side rail
+
+  // rifle, gripped forward
+  const gun = new THREE.Group();
+  add(gun, BOX(0.060, 0.070, 0.26), gearD, 0, 0, 0.02);
+  add(gun, BOX(0.042, 0.042, 0.22 + tier * 0.035), steel, 0, 0.010, 0.25 + tier * 0.018);
+  add(gun, CYL(0.034, 0.034, 0.055), gearD, 0, 0.010, 0.37 + tier * 0.036, Math.PI / 2, 0, 0);
+  add(gun, BOX(0.05, 0.11, 0.06), gear, 0, -0.075, 0.01);          // magazine
+  add(gun, BOX(0.058, 0.085, 0.11), mat(0x6b4a2a, 0.85), 0, -0.015, -0.155);   // stock
+  if (tier >= 3){
+    add(gun, BOX(0.042, 0.042, 0.11), gearD, 0, 0.06, 0.08);       // scope
+    add(gun, CYL(0.028, 0.028, 0.04), mat(0x9fe8ff, 0.2, 0.6), 0, 0.06, 0.14, Math.PI / 2, 0, 0);
+  }
+  gun.position.set(0.075, 0.585, 0.19); gun.rotation.set(0.10, -0.22, 0.05); g.add(gun);
+
+  // backpack, radio, cape
+  add(g, BOX(0.34, 0.30, 0.19), tier >= 2 ? gear : clothD, 0, 0.655, -0.235);
+  add(g, BOX(0.30, 0.055, 0.20), gearD, 0, 0.79, -0.235);
+  add(g, BOX(0.10, 0.24, 0.20), gearD, 0, 0.655, -0.245);
+  if (tier >= 2) add(g, BOX(0.13, 0.13, 0.13), tier >= 4 ? gold : steel, 0.11, 0.80, -0.245);
+  if (tier >= 3) add(g, CYL(0.012, 0.012, 0.42), steel, -0.13, 0.94, -0.27, 0.12, 0, 0);
+  if (tier >= 4){
+    const cape = add(g, BOX(0.44, 0.52, 0.035), mat(0xb4302a, 0.85), 0, 0.55, -0.28, 0.12, 0, 0);
+    add(g, SPH(0.055), gold, 0, 1.22, 0);
+    add(g, CYL(0.0, 0.06, 0.20), gold, 0, 1.14, 0);
+  }
+  const lean = new THREE.Group(); lean.add(g); g.rotation.x = -0.20;   // lean forward into the advance
+  lean.rotation.y = Math.PI;                                        // face -z, as before
+  lean.scale.setScalar(1.14);
+  return lean;
+}
+
+/* ---- armour ------------------------------------------------------------------------------ */
+function tank(team, tier){
+  const g = new THREE.Group();
+  const C = TEAM[team], CD = mix(C, 0x000000, 0.34), CL = mix(C, 0xffffff, 0.20);
+  const body = mat(C, 0.62, 0.16), bodyD = mat(CD, 0.6, 0.18), bodyL = mat(CL, 0.6, 0.16);
+  const track = mat(0x22272e, 0.9, 0.05), wheel = mat(0x4a5361, 0.55, 0.35);
+  const steel = mat(STEEL, 0.34, 0.8), gold = mat(GOLD, 0.3, 0.75), gear = mat(GEAR, 0.68, 0.15);
+
+  // running gear: tracks with visible road wheels, drive sprocket and idler
+  for (const s of [-1, 1]){
+    add(g, BOX(0.30, 0.34, 1.72), track, s * 0.58, 0.26, 0);
+    add(g, CYL(0.17, 0.17, 0.32), track, s * 0.58, 0.26, 0.86, 0, 0, Math.PI / 2);
+    add(g, CYL(0.17, 0.17, 0.32), track, s * 0.58, 0.26, -0.86, 0, 0, Math.PI / 2);
+    for (let k = -2; k <= 2; k++) add(g, CYL(0.135, 0.135, 0.345), wheel, s * 0.58, 0.24, k * 0.36, 0, 0, Math.PI / 2);
+    add(g, CYL(0.115, 0.115, 0.35), steel, s * 0.58, 0.26, 0.86, 0, 0, Math.PI / 2);
+    add(g, BOX(0.36, 0.05, 1.5), bodyD, s * 0.58, 0.47, -0.05);        // fender
+  }
+  // hull: flat deck plus a sloped glacis at the front
+  add(g, BOX(1.18, 0.30, 1.44), body, 0, 0.55, -0.06);
+  add(g, BOX(1.14, 0.10, 0.52), body, 0, 0.535, 0.62, -0.62, 0, 0);    // glacis
+  add(g, BOX(1.16, 0.07, 1.30), bodyL, 0, 0.705, -0.10);               // deck highlight
+  add(g, BOX(0.9, 0.09, 0.16), bodyD, 0, 0.60, 0.78);                  // nose plate
+  add(g, BOX(0.26, 0.16, 0.10), steel, -0.36, 0.60, 0.80);             // headlight housing
+  add(g, CYL(0.06, 0.06, 0.04), mat(0xfff0c0, 0.25, 0.5), -0.36, 0.60, 0.855, Math.PI / 2, 0, 0);
+
+  // turret: sloped cheeks, mantlet, cupola
+  const t = new THREE.Group();
+  add(t, CYL(0.40, 0.50, 0.30, 20), bodyD, 0, 0, 0);
+  add(t, BOX(0.62, 0.26, 0.46), bodyD, 0, 0.0, 0.30);
+  add(t, CYL(0.38, 0.42, 0.06, 20), bodyL, 0, 0.16, 0);
+  add(t, BOX(0.30, 0.24, 0.14), gear, 0, 0.02, 0.50);                  // mantlet
+  const barrels = tier >= 3 ? [-0.11, 0.11] : [0];
+  for (const bx of barrels){
+    add(t, CYL(0.058, 0.068, 0.95 + tier * 0.07), steel, bx, 0.02, 0.95 + tier * 0.035, Math.PI / 2, 0, 0);
+    add(t, CYL(0.085, 0.085, 0.14), gear, bx, 0.02, 1.40 + tier * 0.07, Math.PI / 2, 0, 0);   // muzzle brake
+  }
+  add(t, CYL(0.15, 0.16, 0.13, 14), bodyD, -0.16, 0.20, -0.14);        // cupola
+  add(t, CYL(0.155, 0.155, 0.03, 14), gear, -0.16, 0.275, -0.14);
+  add(t, BOX(0.34, 0.16, 0.22), gear, 0.22, 0.16, -0.26);              // stowage
+  if (tier >= 2) add(t, CYL(0.014, 0.014, 0.62), steel, 0.30, 0.42, -0.20, 0.16, 0, 0.08);
+  if (tier >= 1) for (const s of [-1, 1]) add(t, BOX(0.07, 0.20, 0.40), tier >= 4 ? gold : bodyD, s * 0.50, 0.02, 0.06);
+  t.position.set(0, 0.80, -0.06); g.add(t);
+
+  // applique armour and trophies
+  if (tier >= 1) for (const s of [-1, 1]) add(g, BOX(0.06, 0.22, 1.10), bodyD, s * 0.755, 0.60, -0.10);
+  if (tier >= 4){
+    for (const s of [-1, 1]) add(g, CYL(0.0, 0.11, 0.34), gold, s * 0.38, 0.56, 0.92, Math.PI / 2, 0, 0);
+    add(g, BOX(0.5, 0.05, 0.12), gold, 0, 0.755, 0.42);
+  }
+  g.scale.setScalar(0.70);
+  return g;
+}
+
+/* ---- render list -------------------------------------------------------------------------- */
+const LIST = [];
+for (const team of ['p','r','y','v']) for (let t = 0; t < 5; t++){
+  LIST.push({ name: `soldier${t}_${team}`, build: () => soldier(team, t), half: 1.10, cy: 0.60 });
+  LIST.push({ name: `tank${t}_${team}`,    build: () => tank(team, t),    half: 1.15, cy: 0.45 });
+}
+for (const team of ['p','r']) for (let t = 0; t < 5; t++){
+  LIST.push({ name: `port_soldier${t}_${team}`, build: () => { const g = soldier(team, t); g.rotation.y = -Math.PI * 0.35; return g; }, half: 1.00, cy: 0.72, low: true });
+  LIST.push({ name: `port_tank${t}_${team}`,    build: () => { const g = tank(team, t);    g.rotation.y =  Math.PI * 0.30; return g; }, half: 1.05, cy: 0.50, low: true });
+}
+
+const down = document.createElement('canvas'); down.width = down.height = OUT;
+const dctx = down.getContext('2d'); dctx.imageSmoothingQuality = 'high';
+
+(async () => {
+  const out = document.getElementById('out');
+  for (let i = 0; i < LIST.length; i++){
+    const sp = LIST[i];
+    const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x5a6a55, 0.62));
+    const key = new THREE.DirectionalLight(0xfff4e2, 1.35); key.position.set(3.5, 7.5, 3.0); scene.add(key);
+    const rim = new THREE.DirectionalLight(0xbfe0ff, 0.85);  rim.position.set(-3.5, 2.5, -3.5); scene.add(rim);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.32); fill.position.set(-2.0, 1.5, 4.0); scene.add(fill);
+    scene.add(sp.build());
+    setCam(sp.half, sp.cy, sp.low);
+    renderer.render(scene, cam);
+    dctx.clearRect(0, 0, OUT, OUT);
+    dctx.drawImage(renderer.domElement, 0, 0, OUT, OUT);
+    const url = down.toDataURL('image/png');
+    const prev = document.createElement('canvas'); prev.width = prev.height = OUT;
+    prev.getContext('2d').drawImage(down, 0, 0); out.appendChild(prev);
+    await fetch('/save?name=' + sp.name, { method: 'POST', body: url });
+    document.title = 'AT ' + (i + 1) + '/' + LIST.length;
+  }
+  document.title = 'DONE ' + LIST.length;
+})();
+</script></body></html>

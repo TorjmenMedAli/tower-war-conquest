@@ -37,3 +37,6 @@ Thumbs.db
 # Play Console debug symbols (build output)
 tds-android/native-debug-symbols/
 tds-android/native-debug-symbols.zip
+
+# Sprite renderer scratch output (the finished PNGs live in tds-web/assets/sprites)
+tds-web/tools/sprites/
