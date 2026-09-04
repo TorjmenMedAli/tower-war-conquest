@@ -296,7 +296,7 @@ function genLevel(L, opts){
     if (seen.size === pts.length && pts.length === n) break;
   }
   pts.sort((a, b) => b.y - a.y);                          // bottom → top
-  const towers = pts.map((p, i) => ({ id: i, x: p.x, y: p.y, type: 'barracks', owner: 0, lv: 3 + Math.floor(rnd() * 12), gen: 0, send: 0, routes: [], cd: 0, flash: 0 }));
+  const towers = pts.map((p, i) => ({ id: i, x: p.x, y: p.y, type: 'barracks', owner: 0, lv: 3 + Math.floor(rnd() * 12), gen: 0, send: 0, routes: [], cd: 0, flash: 0, pulse: 0, glow: 0, tierFx: 0 }));
   // player: bottom-most (+ a second one from L3 on some levels)
   const pTowers = (L >= 3 && L % 4 === 3 && !pvp) ? 2 : 1;
   for (let i = 0; i < pTowers; i++){ towers[i].owner = 1; towers[i].lv = i === 0 ? 20 : 8; }
@@ -422,13 +422,51 @@ function spawnUnit(from, to){
 function unitPos(u){ const a = state.towers[u.from], b = state.towers[u.to]; const dx = b.x - a.x, dy = b.y - a.y; const nx = -dy / (u.len || 1), ny = dx / (u.len || 1); return { x: a.x + dx * u.t + nx * u.off, y: a.y + dy * u.t + ny * u.off }; }
 function boom(x, y, col, n, big){ for (let k = 0; k < (n || 8); k++){ const a = Math.random() * 6.283, v = (40 + Math.random() * 120) * (big ? 1.8 : 1); state.fx.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0.35 + Math.random() * 0.3, col: col || '#ffd24a', r: (big ? 6 : 3) + Math.random() * 3 }); } }
 function pop(x, y, txt, col){ state.pops.push({ x, y, vy: -60, life: 0.8, txt, col: col || '#fff' }); }
+/* ---- upgrade / tier FX ----------------------------------------------------------------
+   Particle kinds: 'ring' (expanding shockwave), 'spark' (streaking ember with a tail),
+   'beam' (vertical light column), 'glyph' (rising chevron). Plain particles keep the old
+   ballistic behaviour so nothing else has to change. */
+function ring(x, y, col, r0, r1, life, w, delay){ state.fx.push({ kind: 'ring', x, y, col, r0, r1, life, max: life, w: w || 3, delay: delay || 0 }); }
+function spark(x, y, col, n, spd, up){ for (let k = 0; k < n; k++){ const a = Math.random() * 6.283, v = spd * (0.45 + Math.random());
+  state.fx.push({ kind: 'spark', x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v * 0.55 - (up || 0), life: 0.45 + Math.random() * 0.45, max: 0.9, col, r: 1.6 + Math.random() * 2.4, g: 120 }); } }
+function beam(x, y, col, life, w, h){ state.fx.push({ kind: 'beam', x, y, col, life, max: life, w: w || 26, h: h || 170 }); }
+function glyph(x, y, col, txt){ state.fx.push({ kind: 'glyph', x, y, col, txt, life: 0.9, max: 0.9, vy: -52 }); }
+
+/* Called whenever a tower gains a level. `before` is its tier prior to the gain. */
+function towerLevelUp(t, before){
+  t.pulse = Math.min(1, (t.pulse || 0) + 0.55);          // squash-and-stretch pop
+  t.glow = Math.min(1, (t.glow || 0) + 0.5);             // additive rim bloom
+  const col = OWNER_COL[t.owner] || '#ffd24a';
+  const now = towerTier(t);
+  if (now > before){
+    // TIER UP — the big, readable moment
+    t.tierFx = 1.4;
+    t.pulse = 1; t.glow = 1;
+    const gold = now >= 3 ? '#ffe27a' : '#9fe8ff';
+    ring(t.x, t.y, gold, 8, 120, 0.75, 6);
+    ring(t.x, t.y, '#ffffff', 4, 78, 0.5, 3);
+    ring(t.x, t.y, gold, 6, 150, 0.8, 3, 0.12);
+    beam(t.x, t.y, gold, 0.75, 34, 210);
+    spark(t.x, t.y - 10, gold, 26, 190, 70);
+    spark(t.x, t.y - 10, '#ffffff', 12, 130, 50);
+    pop(t.x, t.y - 66, now >= 3 ? 'ELITE TOWER!' : 'TIER ' + now + '!', gold);
+    if (t.owner === 1){ SFX.play('chest'); buzz('medium'); }
+  } else if (t.owner === 1 && t.lv % 5 === 0){
+    // every 5th level gets a small flourish so growth stays legible without spam
+    ring(t.x, t.y, col, 6, 54, 0.42, 3);
+    spark(t.x, t.y - 8, '#fff', 6, 90, 40);
+  }
+}
 function killUnit(u, byPlayer){ if (u.dead) return; u.dead = true; const p = unitPos(u); boom(p.x, p.y, OWNER_COL[u.owner], 5); if (byPlayer && u.owner !== 1){ state.kills++; state.score += u.tank ? 4 : 2; } }
 
 /* ---- capture ---- */
 function capture(t, by){
   const old = t.owner;
-  t.owner = by; t.routes = []; t.flash = 0.6;
+  t.owner = by; t.routes = []; t.flash = 0.6; t.pulse = 1; t.glow = 0.9;
   boom(t.x, t.y, OWNER_COL[by], 18, true);
+  ring(t.x, t.y, OWNER_COL[by], 6, 110, 0.6, 5);
+  ring(t.x, t.y, '#ffffff', 4, 70, 0.4, 2.5, 0.08);
+  spark(t.x, t.y - 8, OWNER_COL[by], 14, 150, 55);
   if (by === 1){ state.caps++; state.score += 25; SFX.play('chest'); buzz('medium'); pop(t.x, t.y - 40, 'CAPTURED!', '#8fe388'); }
   else if (old === 1){ SFX.play('hurt'); buzz('heavy'); pop(t.x, t.y - 40, 'LOST!', '#ff8a78'); }
   else SFX.play('hit');
@@ -442,11 +480,14 @@ function update(dt){
   // 1. breeding + sending + tower guns
   for (const t of towers){
     if (t.flash > 0) t.flash -= dt;
+    if (t.pulse > 0) t.pulse = Math.max(0, t.pulse - dt * 3.2);
+    if (t.glow > 0) t.glow = Math.max(0, t.glow - dt * 1.6);
+    if (t.tierFx > 0) t.tierFx = Math.max(0, t.tierFx - dt);
     if (t.cd > 0) t.cd -= dt;
     if (t.owner && BREEDS[t.type]){
       const rate = (t.type === 'fort' ? 2 : 1) * (t.owner === 1 ? (state.pRate || 1) : state.eRate);
       t.gen += rate * dt;
-      while (t.gen >= 1){ t.gen -= 1; if (t.lv < TOWER_CAP(t)) t.lv += 1; }
+      while (t.gen >= 1){ t.gen -= 1; if (t.lv < TOWER_CAP(t)){ const before = towerTier(t); t.lv += 1; towerLevelUp(t, before); } }
       for (const r of t.routes){
         r.acc += SEND_RATE * dt;
         while (r.acc >= 1){ r.acc -= 1; if (!spawnUnit(t, towers[r.to])) { r.acc = 0; break; } }
@@ -529,7 +570,14 @@ function update(dt){
     else s.life -= dt;
   }
   state.shots = state.shots.filter(s => s.rocket ? s.t < 1 : s.life > 0);
-  for (const f of state.fx){ f.x += f.vx * dt; f.y += f.vy * dt; f.vy += 160 * dt; f.life -= dt; }
+  for (const f of state.fx){
+    if (f.delay > 0){ f.delay -= dt; continue; }
+    f.life -= dt;
+    if (f.kind === 'ring' || f.kind === 'beam') continue;
+    if (f.kind === 'glyph'){ f.y += f.vy * dt; f.vy *= 0.96; continue; }
+    f.x += f.vx * dt; f.y += f.vy * dt; f.vy += (f.g != null ? f.g : 160) * dt;
+    if (f.kind === 'spark') { f.vx *= 0.96; }
+  }
   state.fx = state.fx.filter(f => f.life > 0);
   for (const p of state.pops){ p.y += p.vy * dt; p.life -= dt; }
   state.pops = state.pops.filter(p => p.life > 0);
@@ -630,6 +678,13 @@ function bindInput(){
    RENDERING
    ============================================================================================ */
 function rr(x, y, w, h, r){ r = Math.min(r, w / 2, h / 2); ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath(); }
+/* Lighten (amt>0) / darken (amt<0) a #rrggbb colour. */
+function shade(hex, amt){
+  const h = hex.replace('#',''); const n = parseInt(h.length === 3 ? h.split('').map(c=>c+c).join('') : h, 16);
+  let r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const f = v => Math.max(0, Math.min(255, Math.round(amt >= 0 ? v + (255 - v) * amt : v * (1 + amt))));
+  return `rgb(${f(r)},${f(g)},${f(b)})`;
+}
 let menuStars = null;
 function drawMenuBg(){
   const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#1b3a6b'); g.addColorStop(0.6, '#0f2547'); g.addColorStop(1, '#0a1730');
@@ -648,21 +703,59 @@ function drawMenuBg(){
 function drawGround(){
   const R = state.region || REGIONS[0];
   const s = MAP.s;
-  ctx.fillStyle = R.ground; ctx.fillRect(0, 0, W, H);
-  // soft patches
-  ctx.fillStyle = R.ground2;
-  const rnd = mulberry(state.level * 31 + 7);
-  for (let i = 0; i < 26; i++){ const p = toScr(rnd() * MW, rnd() * MH); ctx.beginPath(); ctx.ellipse(p.x, p.y, (30 + rnd() * 70) * s, (18 + rnd() * 40) * s, rnd() * 3, 0, 6.283); ctx.fill(); }
-  // scenery (kept away from towers)
-  { const dec = decor(); for (const d of dec){ const im = spr(d.k); if (!im) continue; const q = toScr(d.x, d.y), sz = d.sz * s; ctx.drawImage(im, q.x - sz / 2, q.y - sz * 0.6, sz, sz); } }
-  // map frame
-  ctx.strokeStyle = 'rgba(0,0,0,.18)'; ctx.lineWidth = 3; rr(MAP.x, MAP.y, MW * s, MH * s, 22 * s); ctx.stroke();
-  // river
+  // baked, cached terrain texture (see terrain.js) — one blit per frame
+  const tex = (typeof Terrain !== 'undefined') ? Terrain.get(R.id, W, H, state.level || 1) : null;
+  if (tex) ctx.drawImage(tex, 0, 0, W, H);
+  else { ctx.fillStyle = R.ground; ctx.fillRect(0, 0, W, H); }
+  // playfield inset: a subtly brighter panel so the map area reads apart from the letterboxing
+  ctx.save();
+  rr(MAP.x, MAP.y, MW * s, MH * s, 26 * s); ctx.clip();
+  const lift = ctx.createLinearGradient(0, MAP.y, 0, MAP.y + MH * s);
+  lift.addColorStop(0, 'rgba(255,255,255,.10)'); lift.addColorStop(0.5, 'rgba(255,255,255,.03)'); lift.addColorStop(1, 'rgba(0,0,0,.08)');
+  ctx.fillStyle = lift; ctx.fillRect(MAP.x, MAP.y, MW * s, MH * s);
+  ctx.restore();
+  // river — layered water with depth, caustics and foam edges
   if (state.river){ const r = state.river; const a = toScr(0, r.y - r.h / 2), b = toScr(MW, r.y + r.h / 2);
-    ctx.fillStyle = R.water; ctx.fillRect(MAP.x, a.y, MW * s, b.y - a.y);
-    ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2 * s;
-    for (let k = 0; k < 6; k++){ const yy = a.y + (b.y - a.y) * (0.2 + k * 0.13); ctx.beginPath(); for (let x = 0; x <= MW; x += 24){ const p = toScr(x, 0); ctx.lineTo(p.x, yy + Math.sin(x / 40 + state.t * 2 + k) * 2 * s); } ctx.stroke(); }
+    const y0 = a.y, y1 = b.y, hh = y1 - y0;
+    const wg = ctx.createLinearGradient(0, y0, 0, y1);
+    wg.addColorStop(0, shade(R.water, -0.28)); wg.addColorStop(0.35, R.water); wg.addColorStop(0.75, shade(R.water, 0.12)); wg.addColorStop(1, shade(R.water, -0.22));
+    ctx.fillStyle = wg; ctx.fillRect(MAP.x, y0, MW * s, hh);
+    ctx.save(); ctx.beginPath(); ctx.rect(MAP.x, y0, MW * s, hh); ctx.clip();
+    // slow drifting caustic bands
+    ctx.globalCompositeOperation = 'lighter';
+    for (let k = 0; k < 5; k++){
+      ctx.strokeStyle = `rgba(255,255,255,${0.05 + k * 0.02})`; ctx.lineWidth = (5 - k * 0.6) * s;
+      const yy = y0 + hh * (0.16 + k * 0.17);
+      ctx.beginPath();
+      for (let x = 0; x <= MW; x += 16){ const q = toScr(x, 0); ctx.lineTo(q.x, yy + Math.sin(x / 55 + state.t * (1.1 + k * 0.35) + k) * 3.4 * s + Math.sin(x / 21 + state.t) * 1.2 * s); }
+      ctx.stroke();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    // sparkle glints
+    for (let k = 0; k < 14; k++){
+      const ph = k * 2.39, gx = MAP.x + ((k * 137.5) % (MW * s)), gy = y0 + hh * (0.2 + ((k * 0.37) % 0.6));
+      const al = 0.25 + 0.25 * Math.sin(state.t * 3 + ph);
+      if (al <= 0.05) continue;
+      ctx.globalAlpha = al; ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.ellipse(gx + Math.sin(state.t * 0.7 + ph) * 8 * s, gy, 4 * s, 1.1 * s, 0, 0, 6.283); ctx.fill();
+    }
+    ctx.globalAlpha = 1; ctx.restore();
+    // foam banks
+    ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2.5 * s;
+    for (const edge of [y0, y1]){
+      ctx.beginPath();
+      for (let x = 0; x <= MW; x += 12){ const q = toScr(x, 0); ctx.lineTo(q.x, edge + Math.sin(x / 34 + state.t * 1.6 + (edge === y0 ? 0 : 2)) * 1.8 * s); }
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(0,0,0,.16)'; ctx.fillRect(MAP.x, y0, MW * s, 3 * s);
   }
+  // scenery (kept away from towers) — with contact shadows so props sit on the ground
+  { const dec = decor(); for (const d of dec){ const im = spr(d.k); if (!im) continue; const q = toScr(d.x, d.y), sz = d.sz * s;
+      ctx.save(); ctx.globalAlpha = 0.22; ctx.fillStyle = '#000'; ctx.beginPath(); ctx.ellipse(q.x, q.y + sz * 0.10, sz * 0.26, sz * 0.10, 0, 0, 6.283); ctx.fill(); ctx.restore();
+      ctx.drawImage(im, q.x - sz / 2, q.y - sz * 0.6, sz, sz); } }
+  // map frame — inner shadow line + crisp outline
+  ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 2 * s; rr(MAP.x + 2, MAP.y + 2, MW * s - 4, MH * s - 4, 24 * s); ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 3 * s; rr(MAP.x, MAP.y, MW * s, MH * s, 26 * s); ctx.stroke();
 }
 let _decor = null, _decorKey = '';
 function decor(){
@@ -724,22 +817,126 @@ const towerTier = t => t.lv >= 20 ? 3 : t.lv >= 10 ? 2 : 1;
 const troopTier = owner => { if (owner !== 1) return Math.min(4, Math.floor(state.level / 25)); return 0; };
 function drawTowerArt(t, p, s){
   const col = OWNER_COL[t.owner], R = TOWER_R[t.type] * s, fort = t.type === 'fort';
+  const tier = towerTier(t), owned = !!t.owner;
+  const pulse = t.pulse || 0, glow = t.glow || 0, tierFx = t.tierFx || 0;
   ctx.save(); ctx.translate(p.x, p.y);
-  // ground pad: team-coloured disc + shadow (also the tap target)
-  ctx.fillStyle = 'rgba(0,0,0,.22)'; ctx.beginPath(); ctx.ellipse(0, R * 0.42, R * 1.02, R * 0.62, 0, 0, 6.283); ctx.fill();
-  ctx.fillStyle = t.owner ? col : '#b8c0c8'; ctx.globalAlpha = 0.55; ctx.beginPath(); ctx.ellipse(0, R * 0.36, R * 0.98, R * 0.58, 0, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1;
-  ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2 * s; ctx.stroke();
-  const im = spr(`tower_${t.type}${towerTier(t)}_${OWNER_KEY[t.owner]}`);
-  if (im){ const w = (fort ? 330 : 230) * s; ctx.drawImage(im, -w / 2, -w * 0.58, w, w); }
-  else { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.283); ctx.fill(); }
-  if (t.flash > 0){ ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,255,255,${Math.min(0.6, t.flash)})`; ctx.beginPath(); ctx.ellipse(0, -R * 0.2, R * 0.9, R * 1.1, 0, 0, 6.283); ctx.fill(); ctx.globalCompositeOperation = 'source-over'; }
-  if (t.owner && t.type === 'sniper'){ ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1.5; ctx.setLineDash([4, 6]); ctx.beginPath(); ctx.arc(0, 0, Math.min(280, 130 + t.lv * 4) * s, 0, 6.283); ctx.stroke(); ctx.setLineDash([]); }
-  // level badge
-  const lv = Math.max(0, Math.floor(t.lv + 1e-6)); const by = R * 0.72, bw = (lv >= 10 ? 40 : 30) * s, bh = 24 * s;
-  ctx.fillStyle = t.owner ? OWNER_DARK[t.owner] : '#6b7480'; rr(-bw / 2, by - bh / 2, bw, bh, bh / 2); ctx.fill(); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * s; ctx.stroke();
-  ctx.font = `800 ${16 * s}px "Baloo 2", Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = '#fff'; ctx.fillText(lv, 0, by + 1 * s); ctx.textBaseline = 'alphabetic';
-  // route slots (white = free, hollow = in use)
-  if (t.owner && BREEDS[t.type]){ const n = maxRoutes(t.lv), used = t.routes.length; for (let i = 0; i < n; i++){ const x = (i - (n - 1) / 2) * 11 * s; ctx.beginPath(); ctx.arc(x, by + 20 * s, 4 * s, 0, 6.283); ctx.fillStyle = i < n - used ? '#fff' : 'rgba(255,255,255,.3)'; ctx.fill(); ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 1.5 * s; ctx.stroke(); } }
+
+  /* --- ground pad: soft drop shadow, team disc with a bevel, animated rim for owned towers --- */
+  ctx.save(); ctx.globalAlpha = 0.28; ctx.fillStyle = '#000'; ctx.filter = 'blur(' + (5 * s).toFixed(1) + 'px)';
+  ctx.beginPath(); ctx.ellipse(0, R * 0.46, R * 1.05, R * 0.62, 0, 0, 6.283); ctx.fill(); ctx.restore();
+
+  const padCol = owned ? col : '#b8c0c8';
+  const pg = ctx.createRadialGradient(0, R * 0.30, R * 0.15, 0, R * 0.36, R);
+  pg.addColorStop(0, shade(padCol, 0.35)); pg.addColorStop(0.65, padCol); pg.addColorStop(1, shade(padCol, -0.3));
+  ctx.globalAlpha = 0.7; ctx.fillStyle = pg;
+  ctx.beginPath(); ctx.ellipse(0, R * 0.36, R * 0.98, R * 0.58, 0, 0, 6.283); ctx.fill(); ctx.globalAlpha = 1;
+  ctx.strokeStyle = 'rgba(255,255,255,.6)'; ctx.lineWidth = 2 * s; ctx.stroke();
+
+  /* --- tier aura: a slow rotating halo that makes upgrade state readable at a glance --- */
+  if (owned && tier >= 2){
+    const auraCol = tier >= 3 ? '#ffd85e' : '#7fd2ff';
+    const breathe = 0.5 + 0.5 * Math.sin(state.t * 2 + t.id);
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.30 + 0.18 * breathe;
+    const ag = ctx.createRadialGradient(0, R * 0.1, R * 0.2, 0, R * 0.1, R * 1.5);
+    ag.addColorStop(0, auraCol); ag.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = ag; ctx.beginPath(); ctx.ellipse(0, R * 0.1, R * 1.5, R * 1.2, 0, 0, 6.283); ctx.fill();
+    ctx.restore();
+    // dashed orbit ring
+    ctx.save(); ctx.rotate(state.t * (tier >= 3 ? 0.7 : 0.4));
+    ctx.strokeStyle = auraCol; ctx.globalAlpha = 0.7; ctx.lineWidth = 2.4 * s;
+    ctx.setLineDash([7 * s, 9 * s]);
+    ctx.beginPath(); ctx.ellipse(0, R * 0.34, R * 1.06, R * 0.62, 0, 0, 6.283); ctx.stroke();
+    ctx.setLineDash([]); ctx.restore();
+  }
+
+  /* --- the building, with an upgrade squash-and-stretch --- */
+  const k = pulse * pulse;                         // ease-out on the pop
+  const sx = 1 + k * 0.14, sy = 1 - k * 0.09;
+  ctx.save(); ctx.scale(sx, sy);
+  const im = spr(`tower_${t.type}${tier}_${OWNER_KEY[t.owner]}`);
+  const bw = (fort ? 330 : 230) * s;
+  if (im){
+    // grounded contact shadow beneath the sprite
+    ctx.save(); ctx.globalAlpha = 0.2; ctx.fillStyle = '#000'; ctx.filter = 'blur(' + (3 * s).toFixed(1) + 'px)';
+    ctx.beginPath(); ctx.ellipse(0, R * 0.22, R * 0.7, R * 0.26, 0, 0, 6.283); ctx.fill(); ctx.restore();
+    ctx.drawImage(im, -bw / 2, -bw * 0.58, bw, bw);
+  } else { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.283); ctx.fill(); }
+
+  /* additive bloom on level-up / capture, masked to the sprite so it reads as the tower lighting up */
+  const bloom = Math.max(glow, Math.min(1, t.flash > 0 ? t.flash : 0));
+  if (bloom > 0.01 && im){
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.min(0.75, bloom * 0.8);
+    ctx.drawImage(im, -bw / 2, -bw * 0.58, bw, bw);
+    ctx.globalAlpha = Math.min(0.5, bloom * 0.5); ctx.filter = 'blur(' + (6 * s).toFixed(1) + 'px)';
+    ctx.drawImage(im, -bw / 2, -bw * 0.58, bw, bw);
+    ctx.restore();
+  }
+  ctx.restore();
+
+  /* --- orbiting motes drawn in FRONT of the building so the tier reads clearly --- */
+  if (owned && tier >= 2){
+    const auraCol = tier >= 3 ? '#ffd85e' : '#7fd2ff';
+    const motes = tier >= 3 ? 4 : 2;
+    for (let i = 0; i < motes; i++){
+      const a = state.t * 1.4 + i * (6.283 / motes) + t.id;
+      const mx = Math.cos(a) * R * 1.05, my = -R * 0.15 + Math.sin(a) * R * 0.34;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.6 + 0.35 * Math.sin(a * 2);
+      ctx.fillStyle = auraCol; ctx.beginPath(); ctx.arc(mx, my, 2.8 * s, 0, 6.283); ctx.fill();
+      ctx.globalAlpha = 0.28; ctx.beginPath(); ctx.arc(mx, my, 7 * s, 0, 6.283); ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  /* --- tier-up flourish: a hot halo that snaps outward right after the upgrade --- */
+  if (tierFx > 0){
+    const u = 1 - tierFx / 1.4;
+    ctx.save(); ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = Math.max(0, 0.55 * (1 - u));
+    const hg = ctx.createRadialGradient(0, -R * 0.1, R * 0.1, 0, -R * 0.1, R * (1.1 + u * 1.4));
+    hg.addColorStop(0, tier >= 3 ? '#fff2b8' : '#dff4ff'); hg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = hg; ctx.beginPath(); ctx.arc(0, -R * 0.1, R * (1.1 + u * 1.4), 0, 6.283); ctx.fill();
+    ctx.restore();
+  }
+
+  /* --- sniper range ring --- */
+  if (owned && t.type === 'sniper'){
+    const rr2 = Math.min(280, 130 + t.lv * 4) * s;
+    ctx.save(); ctx.strokeStyle = col; ctx.globalAlpha = 0.22; ctx.lineWidth = 1.5 * s;
+    ctx.setLineDash([5 * s, 7 * s]); ctx.lineDashOffset = -state.t * 18 * s;
+    ctx.beginPath(); ctx.arc(0, 0, rr2, 0, 6.283); ctx.stroke(); ctx.setLineDash([]); ctx.restore();
+  }
+
+  /* --- level badge: tier-coloured chip with a gloss, plus tier pips --- */
+  const lv = Math.max(0, Math.floor(t.lv + 1e-6)); const by = R * 0.72, bw2 = (lv >= 10 ? 42 : 32) * s, bh = 25 * s;
+  ctx.save();
+  ctx.globalAlpha = 0.3; ctx.fillStyle = '#000'; rr(-bw2 / 2, by - bh / 2 + 2 * s, bw2, bh, bh / 2); ctx.fill(); ctx.globalAlpha = 1;
+  const base = owned ? OWNER_DARK[t.owner] : '#6b7480';
+  const bg = ctx.createLinearGradient(0, by - bh / 2, 0, by + bh / 2);
+  bg.addColorStop(0, shade(base, 0.3)); bg.addColorStop(1, base);
+  ctx.fillStyle = bg; rr(-bw2 / 2, by - bh / 2, bw2, bh, bh / 2); ctx.fill();
+  ctx.strokeStyle = owned && tier >= 3 ? '#ffd85e' : owned && tier >= 2 ? '#7fd2ff' : '#fff';
+  ctx.lineWidth = 2 * s; ctx.stroke();
+  ctx.globalAlpha = 0.28; ctx.fillStyle = '#fff'; rr(-bw2 / 2 + 3 * s, by - bh / 2 + 2.5 * s, bw2 - 6 * s, bh * 0.38, bh * 0.19); ctx.fill(); ctx.globalAlpha = 1;
+  ctx.font = `800 ${16 * s}px "Baloo 2", Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#fff'; ctx.fillText(lv, 0, by + 1 * s); ctx.textBaseline = 'alphabetic';
+  ctx.restore();
+
+  // tier pips above the badge (★ per tier) — instant read of how upgraded a tower is
+  if (owned && tier >= 2){
+    const pipCol = tier >= 3 ? '#ffd85e' : '#7fd2ff';
+    for (let i = 0; i < tier - 1; i++){
+      const px = (i - (tier - 2) / 2) * 12 * s, py = by - bh * 0.78;
+      ctx.save(); ctx.translate(px, py); ctx.rotate(-Math.PI / 2);
+      ctx.fillStyle = pipCol; ctx.strokeStyle = 'rgba(10,26,56,.7)'; ctx.lineWidth = 1.5 * s;
+      ctx.beginPath();
+      for (let a = 0; a < 10; a++){ const rad = (a % 2 ? 2.2 : 5) * s, an = a * Math.PI / 5; ctx.lineTo(Math.cos(an) * rad, Math.sin(an) * rad); }
+      ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
+    }
+  }
+
+  // route slots (filled = free, hollow = in use)
+  if (owned && BREEDS[t.type]){ const n = maxRoutes(t.lv), used = t.routes.length; for (let i = 0; i < n; i++){ const x = (i - (n - 1) / 2) * 11 * s; ctx.beginPath(); ctx.arc(x, by + 21 * s, 4 * s, 0, 6.283); ctx.fillStyle = i < n - used ? '#fff' : 'rgba(255,255,255,.3)'; ctx.fill(); ctx.strokeStyle = '#0a1a38'; ctx.lineWidth = 1.5 * s; ctx.stroke(); } }
   ctx.restore();
 }
 const SPRITE_FWD = { tank: 3 * Math.PI / 4, soldier: -Math.PI / 4 };   // rendered facing: tanks +z (down-left), soldiers −z (up-right)
@@ -759,7 +956,47 @@ function drawFx(s){
     if (sh.rocket){ const p = toScr(sh.x, sh.y); ctx.fillStyle = '#ff5a4d'; ctx.beginPath(); ctx.arc(p.x, p.y, 4 * s, 0, 6.283); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.beginPath(); ctx.arc(p.x, p.y + 4 * s, 3 * s, 0, 6.283); ctx.fill(); }
     else { const a = toScr(sh.x1, sh.y1), b = toScr(sh.x2, sh.y2); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * s; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
   }
-  for (const f of state.fx){ const p = toScr(f.x, f.y); ctx.globalAlpha = Math.max(0, Math.min(1, f.life * 2.5)); ctx.fillStyle = f.col; ctx.beginPath(); ctx.arc(p.x, p.y, f.r * s, 0, 6.283); ctx.fill(); }
+  for (const f of state.fx){
+    if (f.delay > 0) continue;
+    const p = toScr(f.x, f.y);
+    const u = f.max ? 1 - f.life / f.max : 0;           // 0 → 1 over the particle's life
+    if (f.kind === 'ring'){
+      const rad = (f.r0 + (f.r1 - f.r0) * (1 - Math.pow(1 - u, 3))) * s;
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = Math.max(0, 1 - u) * 0.85; ctx.strokeStyle = f.col; ctx.lineWidth = Math.max(0.5, f.w * (1 - u * 0.7)) * s;
+      ctx.beginPath(); ctx.ellipse(p.x, p.y + 6 * s, rad, rad * 0.55, 0, 0, 6.283); ctx.stroke();
+      ctx.globalAlpha *= 0.4; ctx.lineWidth *= 2.5; ctx.stroke();
+      ctx.restore(); continue;
+    }
+    if (f.kind === 'beam'){
+      ctx.save(); ctx.globalCompositeOperation = 'lighter';
+      const a = Math.sin(Math.min(1, u) * Math.PI);      // fade in then out
+      ctx.globalAlpha = a * 0.55;
+      const g = ctx.createLinearGradient(0, p.y - f.h * s, 0, p.y + 10 * s);
+      g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.55, f.col); g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      const w2 = f.w * s * (1 - u * 0.35);
+      ctx.beginPath(); ctx.moveTo(p.x - w2 * 0.35, p.y - f.h * s); ctx.lineTo(p.x + w2 * 0.35, p.y - f.h * s);
+      ctx.lineTo(p.x + w2, p.y + 8 * s); ctx.lineTo(p.x - w2, p.y + 8 * s); ctx.closePath(); ctx.fill();
+      ctx.restore(); continue;
+    }
+    if (f.kind === 'glyph'){
+      ctx.save(); ctx.globalAlpha = Math.max(0, 1 - u); ctx.font = `800 ${17 * s}px Fredoka, sans-serif`; ctx.textAlign = 'center';
+      ctx.lineWidth = 3 * s; ctx.strokeStyle = '#0a1a38'; ctx.strokeText(f.txt, p.x, p.y); ctx.fillStyle = f.col; ctx.fillText(f.txt, p.x, p.y);
+      ctx.restore(); continue;
+    }
+    if (f.kind === 'spark'){
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.max(0, 1 - u);
+      const tail = 0.045;                                 // short motion-blur streak along velocity
+      const q = toScr(f.x - f.vx * tail, f.y - f.vy * tail);
+      ctx.strokeStyle = f.col; ctx.lineCap = 'round'; ctx.lineWidth = f.r * s;
+      ctx.beginPath(); ctx.moveTo(q.x, q.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+      ctx.globalAlpha *= 0.5; ctx.fillStyle = '#fff';
+      ctx.beginPath(); ctx.arc(p.x, p.y, f.r * 0.55 * s, 0, 6.283); ctx.fill();
+      ctx.restore(); continue;
+    }
+    ctx.globalAlpha = Math.max(0, Math.min(1, f.life * 2.5)); ctx.fillStyle = f.col; ctx.beginPath(); ctx.arc(p.x, p.y, f.r * s, 0, 6.283); ctx.fill();
+  }
   ctx.globalAlpha = 1;
   for (const p of state.pops){ const q = toScr(p.x, p.y); ctx.globalAlpha = Math.min(1, p.life * 2); ctx.font = `800 ${15 * s}px Fredoka, sans-serif`; ctx.textAlign = 'center'; ctx.lineWidth = 3 * s; ctx.strokeStyle = '#0a1a38'; ctx.strokeText(p.txt, q.x, q.y); ctx.fillStyle = p.col; ctx.fillText(p.txt, q.x, q.y); }
   ctx.globalAlpha = 1;
