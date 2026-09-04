@@ -296,7 +296,7 @@ function genLevel(L, opts){
     if (seen.size === pts.length && pts.length === n) break;
   }
   pts.sort((a, b) => b.y - a.y);                          // bottom → top
-  const towers = pts.map((p, i) => ({ id: i, x: p.x, y: p.y, type: 'barracks', owner: 0, lv: 3 + Math.floor(rnd() * 12), gen: 0, send: 0, routes: [], cd: 0, flash: 0, pulse: 0, glow: 0, tierFx: 0 }));
+  const towers = pts.map((p, i) => ({ id: i, x: p.x, y: p.y, type: 'barracks', owner: 0, lv: 3 + Math.floor(rnd() * 12), gen: 0, send: 0, routes: [], cd: 0, flash: 0, pulse: 0, glow: 0, tierFx: 0, kick: 0, kickA: 0, muzzle: 0 }));
   // player: bottom-most (+ a second one from L3 on some levels)
   const pTowers = (L >= 3 && L % 4 === 3 && !pvp) ? 2 : 1;
   for (let i = 0; i < pTowers; i++){ towers[i].owner = 1; towers[i].lv = i === 0 ? 20 : 8; }
@@ -448,7 +448,8 @@ function spawnUnit(from, to){
   const pw = cost * (own === 1 ? (tank ? state.pStrT : state.pStrS) : strength(own));
   const off = (Math.random() - 0.5) * 22;
   const len = Math.hypot(to.x - from.x, to.y - from.y);
-  state.units.push({ owner: own, tank, val: cost, pw, from: from.id, to: to.id, t: (TOWER_R[from.type] - 6) / len, len, off, spd: UNIT_SPD * (tr ? tr.spd : (tank ? 0.82 : 1)), x: from.x, y: from.y, dead: false, gated: {} });
+  state.units.push({ owner: own, tank, val: cost, pw, pw0: pw, from: from.id, to: to.id, t: (TOWER_R[from.type] - 6) / len, len, off, spd: UNIT_SPD * (tr ? tr.spd : (tank ? 0.82 : 1)), x: from.x, y: from.y, dead: false, gated: {}, ph: Math.random() * 6.283, born: 0, hit: 0, dust: 0 });
+  from.kick = 0.22; from.kickA = Math.atan2(to.y - from.y, to.x - from.x);
   if (own === 1) state.sent++;
   return true;
 }
@@ -463,6 +464,13 @@ function ring(x, y, col, r0, r1, life, w, delay){ state.fx.push({ kind: 'ring', 
 function spark(x, y, col, n, spd, up){ for (let k = 0; k < n; k++){ const a = Math.random() * 6.283, v = spd * (0.45 + Math.random());
   state.fx.push({ kind: 'spark', x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v * 0.55 - (up || 0), life: 0.45 + Math.random() * 0.45, max: 0.9, col, r: 1.6 + Math.random() * 2.4, g: 120 }); } }
 function beam(x, y, col, life, w, h){ state.fx.push({ kind: 'beam', x, y, col, life, max: life, w: w || 26, h: h || 170 }); }
+/* Soft dust or smoke: grows while it fades. Used for footfalls, tank treads,
+   rocket exhaust and explosions. */
+function puff(x, y, n, r, life){ for (let k = 0; k < (n || 1); k++){
+  state.fx.push({ kind: 'puff', x: x + (Math.random() - 0.5) * 6, y: y + (Math.random() - 0.5) * 4,
+    vx: (Math.random() - 0.5) * 22, vy: -6 - Math.random() * 14, g: -4,
+    life: (life || 0.45) * (0.7 + Math.random() * 0.6), max: (life || 0.45) * 1.3,
+    r: r * (0.6 + Math.random() * 0.6), col: '#ffffff' }); } }
 function glyph(x, y, col, txt){ state.fx.push({ kind: 'glyph', x, y, col, txt, life: 0.9, max: 0.9, vy: -52 }); }
 
 /* Called whenever a tower gains a level. `before` is its tier prior to the gain. */
@@ -490,7 +498,11 @@ function towerLevelUp(t, before){
     spark(t.x, t.y - 8, '#fff', 6, 90, 40);
   }
 }
-function killUnit(u, byPlayer){ if (u.dead) return; u.dead = true; const p = unitPos(u); boom(p.x, p.y, OWNER_COL[u.owner], 5); if (byPlayer && u.owner !== 1){ state.kills++; state.score += u.tank ? 4 : 2; } }
+function killUnit(u, byPlayer){ if (u.dead) return; u.dead = true; const p = unitPos(u);
+  boom(p.x, p.y, OWNER_COL[u.owner], u.tank ? 8 : 5);
+  puff(p.x, p.y, u.tank ? 4 : 2, u.tank ? 16 : 9, 0.5);
+  spark(p.x, p.y, u.tank ? '#ffb347' : '#ffffff', u.tank ? 8 : 4, u.tank ? 120 : 70, 20);
+  if (u.tank) ring(p.x, p.y, '#ffb347', 3, 34, 0.3, 2.5); if (byPlayer && u.owner !== 1){ state.kills++; state.score += u.tank ? 4 : 2; } }
 
 /* ---- capture ---- */
 function capture(t, by){
@@ -516,6 +528,8 @@ function update(dt){
     if (t.pulse > 0) t.pulse = Math.max(0, t.pulse - dt * 3.2);
     if (t.glow > 0) t.glow = Math.max(0, t.glow - dt * 1.6);
     if (t.tierFx > 0) t.tierFx = Math.max(0, t.tierFx - dt);
+    if (t.kick > 0) t.kick = Math.max(0, t.kick - dt * 4);
+    if (t.muzzle > 0) t.muzzle = Math.max(0, t.muzzle - dt * 8);
     if (t.cd > 0) t.cd -= dt;
     if (t.owner && BREEDS[t.type]){
       const rate = (t.type === 'fort' ? 2 : 1) * (t.owner === 1 ? (state.pRate || 1) : state.eRate);
@@ -530,13 +544,14 @@ function update(dt){
       const range = Math.min(280, 130 + t.lv * 4);
       let best = null, bd = 1e9;
       for (const u of state.units){ if (u.dead || u.owner === t.owner) continue; const p = unitPos(u); const d = Math.hypot(p.x - t.x, p.y - t.y); if (d < range && d < bd){ bd = d; best = u; } }
-      if (best){ const p = unitPos(best); best.pw -= 1.15 * strength(t.owner); state.shots.push({ x1: t.x, y1: t.y - 30, x2: p.x, y2: p.y, life: 0.12, col: OWNER_COL[t.owner] }); if (best.pw <= 0.05) killUnit(best, t.owner === 1); t.cd = 0.9; SFX.play('shoot'); }
+      if (best){ const p = unitPos(best); best.pw -= 1.15 * strength(t.owner); best.hit = 0.18; state.shots.push({ x1: t.x, y1: t.y - 30, x2: p.x, y2: p.y, life: 0.12, col: OWNER_COL[t.owner], seed: Math.random() });
+        t.kick = 0.2; t.kickA = Math.atan2(p.y - t.y, p.x - t.x); t.muzzle = 0.1; if (best.pw <= 0.05) killUnit(best, t.owner === 1); t.cd = 0.9; SFX.play('shoot'); }
       else t.cd = 0.2;
     }
     if (t.owner && t.type === 'rocket' && t.cd <= 0){
       let best = null, bd = 1e9;
       for (const u of state.units){ if (u.dead || u.owner === t.owner) continue; const p = unitPos(u); const d = Math.hypot(p.x - t.x, p.y - t.y); if (d < 320 && d < bd){ bd = d; best = u; } }
-      if (best){ const p = unitPos(best); state.shots.push({ rocket: true, x: t.x, y: t.y - 20, tx: p.x, ty: p.y, x1: t.x, y1: t.y, t: 0, dur: 0.55, owner: t.owner, col: OWNER_COL[t.owner] }); t.cd = 1.7; SFX.play('tank'); }
+      if (best){ const p = unitPos(best); state.shots.push({ rocket: true, x: t.x, y: t.y - 20, tx: p.x, ty: p.y, x1: t.x, y1: t.y, t: 0, dur: 0.55, owner: t.owner, col: OWNER_COL[t.owner], smoke: 0 }); t.cd = 1.7; t.kick = 0.3; t.kickA = Math.atan2(p.y - t.y, p.x - t.x); t.muzzle = 0.16; puff(t.x, t.y - 10, 5, 16); SFX.play('tank'); }
       else t.cd = 0.25;
     }
   }
@@ -589,7 +604,7 @@ function update(dt){
     for (let j = i + 1; j < live.length; j++){
       const v = live[j]; if (v.dead || v.owner === u.owner) continue;
       if (Math.abs(u.x - v.x) > 16 || Math.abs(u.y - v.y) > 16) continue;
-      const m = Math.min(u.pw, v.pw); u.pw -= m; v.pw -= m;
+      const m = Math.min(u.pw, v.pw); u.pw -= m; v.pw -= m; u.hit = v.hit = 0.18;
       state.fx.push({ x: (u.x + v.x) / 2, y: (u.y + v.y) / 2, vx: 0, vy: -30, life: 0.2, col: '#fff', r: 5 });
       if (u.pw <= 0.05) killUnit(u, v.owner === 1);
       if (v.pw <= 0.05) killUnit(v, u.owner === 1);
@@ -598,11 +613,19 @@ function update(dt){
   }
   // 4. shots / fx
   for (const s of state.shots){
-    if (s.rocket){ s.t += dt / s.dur; s.x = s.x1 + (s.tx - s.x1) * s.t; s.y = s.y1 + (s.ty - s.y1) * s.t - Math.sin(s.t * Math.PI) * 60;
-      if (s.t >= 1){ s.life = 0; boom(s.tx, s.ty, '#ff7a45', 16, true); for (const v of state.units){ if (v.dead || v.owner === s.owner) continue; if (Math.hypot(v.x - s.tx, v.y - s.ty) < 48){ v.pw -= 2.2 * strength(s.owner); if (v.pw <= 0.05) killUnit(v, s.owner === 1); } } } }
+    if (s.rocket){ s.t += dt / s.dur; s.smoke -= dt; if (s.smoke <= 0){ s.smoke = 0.025; puff(s.x, s.y, 1, 7, 0.5); } s.x = s.x1 + (s.tx - s.x1) * s.t; s.y = s.y1 + (s.ty - s.y1) * s.t - Math.sin(s.t * Math.PI) * 60;
+      if (s.t >= 1){ s.life = 0; boom(s.tx, s.ty, '#ff7a45', 16, true); ring(s.tx, s.ty, '#ffb347', 4, 62, 0.4, 4); spark(s.tx, s.ty, '#ffd24a', 10, 150, 30); puff(s.tx, s.ty, 6, 22, 0.9); for (const v of state.units){ if (v.dead || v.owner === s.owner) continue; if (Math.hypot(v.x - s.tx, v.y - s.ty) < 48){ v.pw -= 2.2 * strength(s.owner); v.hit = 0.2; if (v.pw <= 0.05) killUnit(v, s.owner === 1); } } } }
     else s.life -= dt;
   }
   state.shots = state.shots.filter(s => s.rocket ? s.t < 1 : s.life > 0);
+  for (const u of state.units){
+    if (u.dead) continue;
+    if (u.born < 1) u.born = Math.min(1, u.born + dt * 5);
+    if (u.hit > 0) u.hit -= dt;
+    // kick up dust as they advance — tanks throw more than infantry
+    u.dust -= dt;
+    if (u.dust <= 0){ u.dust = u.tank ? 0.11 : 0.26; puff(u.x, u.y + 3, u.tank ? 2 : 1, u.tank ? 8 : 5); }
+  }
   for (const f of state.fx){
     if (f.delay > 0){ f.delay -= dt; continue; }
     f.life -= dt;
@@ -812,9 +835,9 @@ function drawRoutes(){
     for (const r of src.routes){
       const to = state.towers[r.to];
       const a = toScr(src.x, src.y), b = toScr(to.x, to.y);
-      ctx.strokeStyle = 'rgba(0,0,0,.22)'; ctx.lineWidth = 12 * s; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(a.x, a.y + 3 * s); ctx.lineTo(b.x, b.y + 3 * s); ctx.stroke();
-      ctx.strokeStyle = OWNER_COL[src.owner]; ctx.lineWidth = 9 * s; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      ctx.strokeStyle = 'rgba(255,255,255,.75)'; ctx.lineWidth = 2.5 * s; ctx.setLineDash([10 * s, 12 * s]); ctx.lineDashOffset = -state.t * 60 * s; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.setLineDash([]);
+      ctx.strokeStyle = 'rgba(0,0,0,.20)'; ctx.lineWidth = 8 * s; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(a.x, a.y + 2.5 * s); ctx.lineTo(b.x, b.y + 2.5 * s); ctx.stroke();
+      ctx.strokeStyle = OWNER_COL[src.owner]; ctx.globalAlpha = 0.82; ctx.lineWidth = 5.5 * s; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1.6 * s; ctx.setLineDash([9 * s, 13 * s]); ctx.lineDashOffset = -state.t * 60 * s; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); ctx.setLineDash([]);
       // arrow head
       const ang = Math.atan2(b.y - a.y, b.x - a.x), hx = b.x - Math.cos(ang) * (TOWER_R[to.type] + 10) * s, hy = b.y - Math.sin(ang) * (TOWER_R[to.type] + 10) * s;
       ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.moveTo(hx + Math.cos(ang) * 8 * s, hy + Math.sin(ang) * 8 * s); ctx.lineTo(hx + Math.cos(ang + 2.4) * 8 * s, hy + Math.sin(ang + 2.4) * 8 * s); ctx.lineTo(hx + Math.cos(ang - 2.4) * 8 * s, hy + Math.sin(ang - 2.4) * 8 * s); ctx.closePath(); ctx.fill();
@@ -860,6 +883,8 @@ function drawTowerArt(t, p, s){
   const col = OWNER_COL[t.owner], R = TOWER_R[t.type] * s, fort = t.type === 'fort';
   const tier = towerTier(t), owned = !!t.owner;
   const pulse = t.pulse || 0, glow = t.glow || 0, tierFx = t.tierFx || 0;
+  // a slow breath so producing towers feel alive; each tower breathes on its own phase
+  const idle = owned && BREEDS[t.type] ? Math.sin(state.t * 1.8 + t.id * 1.7) * 0.9 * s : 0;
   ctx.save(); ctx.translate(p.x, p.y);
 
   /* --- ground pad: soft drop shadow, team disc with a bevel, animated rim for owned towers --- */
@@ -891,10 +916,13 @@ function drawTowerArt(t, p, s){
     ctx.setLineDash([]); ctx.restore();
   }
 
-  /* --- the building, with an upgrade squash-and-stretch --- */
+  /* --- the building, with an upgrade squash-and-stretch and a firing recoil --- */
   const k = pulse * pulse;                         // ease-out on the pop
   const sx = 1 + k * 0.14, sy = 1 - k * 0.09;
-  ctx.save(); ctx.scale(sx, sy);
+  const kick = t.kick || 0;                        // pushes back along the shot direction
+  ctx.save();
+  ctx.translate(-Math.cos(t.kickA || 0) * kick * 7 * s, -idle - Math.sin(t.kickA || 0) * kick * 7 * s);
+  ctx.scale(sx, sy);
   const im = spr(`tower_${t.type}${tier}_${OWNER_KEY[t.owner]}`);
   const bw = (fort ? 330 : 230) * s;
   if (im){
@@ -914,6 +942,20 @@ function drawTowerArt(t, p, s){
     ctx.restore();
   }
   ctx.restore();
+
+  /* --- muzzle flash at the barrel when the tower fires --- */
+  if (t.muzzle > 0){
+    const mA = t.kickA || 0, mx = Math.cos(mA) * R * 0.75, my = Math.sin(mA) * R * 0.75 - R * 0.35;
+    ctx.save(); ctx.translate(mx, my); ctx.rotate(mA);
+    ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.min(1, t.muzzle * 7);
+    const fg = ctx.createRadialGradient(0, 0, 0, 0, 0, 16 * s);
+    fg.addColorStop(0, '#fff6d5'); fg.addColorStop(0.4, '#ffb347'); fg.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = fg; ctx.beginPath(); ctx.arc(0, 0, 16 * s, 0, 6.283); ctx.fill();
+    // three-pronged star flare
+    ctx.fillStyle = '#fff6d5';
+    for (const an of [0, 2.1, -2.1]){ ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(Math.cos(an) * 20 * s, Math.sin(an) * 20 * s - 2 * s); ctx.lineTo(Math.cos(an) * 20 * s, Math.sin(an) * 20 * s + 2 * s); ctx.closePath(); ctx.fill(); }
+    ctx.restore();
+  }
 
   /* --- orbiting motes drawn in FRONT of the building so the tier reads clearly --- */
   if (owned && tier >= 2){
@@ -986,16 +1028,84 @@ function drawUnit(u, s){
   const ang = Math.atan2(b.y - a.y, b.x - a.x);
   let tier = u.owner === 1 ? troopById(u.tank ? Meta.tank : Meta.soldier).tier : troopTier(u.owner);
   const im = spr(`${u.tank ? 'tank' : 'soldier'}${tier}_${OWNER_KEY[u.owner]}`);
+  const col = OWNER_COL[u.owner];
+
+  // gait: infantry bob and sway as they march, armour rumbles in place
+  const wob = state.t * (u.tank ? 15 : 9) + u.ph;
+  const bob = u.tank ? Math.sin(wob) * 0.6 * s : Math.abs(Math.sin(wob)) * 2.4 * s;
+  const roll = u.tank ? Math.sin(wob * 0.7) * 0.03 : Math.sin(wob) * 0.07;
+  const grow = 0.6 + 0.4 * (u.born < 1 ? u.born : 1);   // pop in when they leave the tower
+
   ctx.save(); ctx.translate(p.x, p.y);
-  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.beginPath(); ctx.ellipse(0, 4 * s, (u.tank ? 13 : 8) * s, (u.tank ? 7 : 4) * s, 0, 0, 6.283); ctx.fill();
-  if (im){ ctx.rotate(ang - SPRITE_FWD[u.tank ? 'tank' : 'soldier']); const w = (u.tank ? 62 : 44) * s; ctx.drawImage(im, -w / 2, -w / 2 - 4 * s, w, w); }
-  else { ctx.fillStyle = OWNER_COL[u.owner]; ctx.beginPath(); ctx.arc(0, 0, 6 * s, 0, 6.283); ctx.fill(); }
+
+  // contact shadow — tightens as the unit lifts off the ground
+  const lift = 1 - bob / (6 * s);
+  ctx.globalAlpha = 0.28 * lift; ctx.fillStyle = '#000';
+  ctx.beginPath(); ctx.ellipse(0, 4 * s, (u.tank ? 15 : 9.5) * s * lift, (u.tank ? 8 : 4.6) * s * lift, 0, 0, 6.283); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // team pool of light under the unit, so red and blue read apart on any terrain
+  ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = 0.20;
+  const gg = ctx.createRadialGradient(0, 2 * s, 1, 0, 2 * s, (u.tank ? 15 : 10) * s);
+  gg.addColorStop(0, col); gg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = gg; ctx.beginPath(); ctx.arc(0, 2 * s, (u.tank ? 15 : 10) * s, 0, 6.283); ctx.fill();
+  ctx.restore();
+
+  ctx.translate(0, -bob); ctx.scale(grow, grow);
+  const w = (u.tank ? 70 : 52) * s;
+  if (im){
+    ctx.save();
+    ctx.rotate(ang - SPRITE_FWD[u.tank ? 'tank' : 'soldier'] + roll);
+    ctx.drawImage(im, -w / 2, -w / 2 - 4 * s, w, w);
+    // white-hot flash the moment they take damage
+    if (u.hit > 0){
+      ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = Math.min(0.9, u.hit * 5);
+      ctx.drawImage(im, -w / 2, -w / 2 - 4 * s, w, w);
+    }
+    ctx.restore();
+  } else { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(0, 0, 6 * s, 0, 6.283); ctx.fill(); }
+
+  // a wounded unit shows how much fight it has left
+  if (u.pw0 && u.pw < u.pw0 - 0.05){
+    const f = Math.max(0, u.pw / u.pw0), bw = (u.tank ? 20 : 14) * s, by = -w * 0.42;
+    ctx.fillStyle = 'rgba(8,14,28,.72)'; rr(-bw / 2, by, bw, 3.2 * s, 1.6 * s); ctx.fill();
+    ctx.fillStyle = f > 0.5 ? '#8fe388' : f > 0.25 ? '#ffd24a' : '#ff6b5a';
+    rr(-bw / 2, by, bw * f, 3.2 * s, 1.6 * s); ctx.fill();
+  }
   ctx.restore();
 }
 function drawFx(s){
   for (const sh of state.shots){
-    if (sh.rocket){ const p = toScr(sh.x, sh.y); ctx.fillStyle = '#ff5a4d'; ctx.beginPath(); ctx.arc(p.x, p.y, 4 * s, 0, 6.283); ctx.fill(); ctx.fillStyle = 'rgba(255,255,255,.5)'; ctx.beginPath(); ctx.arc(p.x, p.y + 4 * s, 3 * s, 0, 6.283); ctx.fill(); }
-    else { const a = toScr(sh.x1, sh.y1), b = toScr(sh.x2, sh.y2); ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 * s; ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+    if (sh.rocket){
+      const p = toScr(sh.x, sh.y);
+      const ang = Math.atan2(sh.ty - sh.y1, sh.tx - sh.x1) + Math.sin(sh.t * Math.PI) * 0.5;
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(ang);
+      ctx.globalCompositeOperation = 'lighter';
+      // exhaust flame, flickering
+      const fl = (7 + Math.random() * 5) * s;
+      const fg = ctx.createLinearGradient(-fl - 4 * s, 0, 2 * s, 0);
+      fg.addColorStop(0, 'rgba(255,90,40,0)'); fg.addColorStop(0.5, '#ff7a2a'); fg.addColorStop(1, '#fff0b8');
+      ctx.fillStyle = fg;
+      ctx.beginPath(); ctx.moveTo(2 * s, -2.6 * s); ctx.lineTo(-fl, 0); ctx.lineTo(2 * s, 2.6 * s); ctx.closePath(); ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+      // warhead
+      ctx.fillStyle = '#e8edf3';
+      ctx.beginPath(); ctx.moveTo(6 * s, 0); ctx.lineTo(-2 * s, -2.4 * s); ctx.lineTo(-2 * s, 2.4 * s); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ff5a4d'; ctx.fillRect(-2 * s, -2.2 * s, 2.5 * s, 4.4 * s);
+      ctx.restore();
+      continue;
+    }
+    // sniper tracer: a bright core inside a coloured glow, with a flash at the muzzle
+    const a = toScr(sh.x1, sh.y1), b = toScr(sh.x2, sh.y2);
+    const fade = Math.max(0, Math.min(1, sh.life / 0.12));
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.lineCap = 'round';
+    ctx.globalAlpha = fade * 0.45; ctx.strokeStyle = sh.col || '#fff'; ctx.lineWidth = 5 * s;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.globalAlpha = fade; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.6 * s;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+    ctx.globalAlpha = fade * 0.9; ctx.fillStyle = '#fff6d5';
+    ctx.beginPath(); ctx.arc(b.x, b.y, 3 * s, 0, 6.283); ctx.fill();
+    ctx.restore();
   }
   for (const f of state.fx){
     if (f.delay > 0) continue;
@@ -1024,6 +1134,14 @@ function drawFx(s){
     if (f.kind === 'glyph'){
       ctx.save(); ctx.globalAlpha = Math.max(0, 1 - u); ctx.font = `800 ${17 * s}px Fredoka, sans-serif`; ctx.textAlign = 'center';
       ctx.lineWidth = 3 * s; ctx.strokeStyle = '#0a1a38'; ctx.strokeText(f.txt, p.x, p.y); ctx.fillStyle = f.col; ctx.fillText(f.txt, p.x, p.y);
+      ctx.restore(); continue;
+    }
+    if (f.kind === 'puff'){
+      const rad = f.r * s * (0.35 + u * 0.85);
+      ctx.save(); ctx.globalAlpha = Math.max(0, (1 - u) * 0.30);
+      const pg = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, rad);
+      pg.addColorStop(0, 'rgba(255,255,255,.9)'); pg.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = pg; ctx.beginPath(); ctx.arc(p.x, p.y, rad, 0, 6.283); ctx.fill();
       ctx.restore(); continue;
     }
     if (f.kind === 'spark'){
