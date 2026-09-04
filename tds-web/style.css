@@ -234,49 +234,8 @@ body {
 }
 .hero-card.equipped .hc-tag { background: linear-gradient(#e7ecf4, #c4ccd8); color: #3a4150; box-shadow: 0 2px 0 #9aa4b4; }
 
-/* ---------- loadout bar: equipped weapon + hero (tap to swap · ⬆ opens the garage) ---------- */
-.loadout { display: flex; gap: 10px; margin-top: 4px; }
-.load-card {
-  flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 8px;
-  padding: 9px; cursor: pointer; position: relative;
-  background: linear-gradient(var(--panel-top), var(--panel-bot));
-  border: 2px solid var(--panel-edge); border-bottom-width: 4px; border-radius: 16px;
-  box-shadow: 0 5px 12px rgba(0,0,0,.35), inset 0 2px 0 rgba(255,255,255,.18);
-  transition: transform .08s ease;
-}
-.load-card:active { transform: translateY(2px); }
-.lc-top { display: flex; align-items: center; gap: 9px; }   /* image + (name / level) beside it */
-.lc-art {
-  flex: 0 0 auto; width: 56px; height: 56px; border-radius: 13px; overflow: hidden;
-  display: grid; place-items: center; font-size: 28px;
-  background: linear-gradient(#2a3a58, #1a2740); border: 2px solid #4f6f9c; box-shadow: inset 0 2px 4px rgba(0,0,0,.4);
-}
-.lc-art { position: relative; }
-.lc-art img, .lc-art svg { width: 100%; height: 100%; object-fit: contain; }
 /* canvas portraits: absolute so % resolves against the 56px box (a grid track would let the
    canvas's intrinsic 256px size blow the layout open) */
-.lc-art canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-.lc-art .lc-tok {
-  width: 100%; height: 100%; display: grid; place-items: center; font-size: 26px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--rc) 55%, #20222b), #181922);
-}
-.lc-art .lc-png { object-fit: cover; object-position: 50% 12%; }
-.lc-info { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.14; }
-.lc-info b { font-size: 13px; font-weight: 800; color: #eaf2ff; letter-spacing: .2px; word-break: break-word;
-  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }   /* 2 lines, never clipped mid-word silently */
-.lc-info i { font-style: normal; font-size: 11px; font-weight: 700; color: #8fd3ff; margin-top: 2px; }
-.lc-upg {
-  flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; gap: 3px;
-  padding: 10px 12px; font-size: 15px; min-width: 46px; min-height: 42px;
-  background: linear-gradient(var(--green-top), var(--green-bot)); border-radius: 13px;
-  box-shadow: 0 4px 0 var(--green-edge), 0 5px 8px rgba(0,0,0,.3), inset 0 -2px 5px rgba(0,0,0,.15);
-}
-.lc-upg { color: #fff; font-weight: 800; font-size: 13px; gap: 3px; }
-.lc-upg .ico { font-size: 13px; }
-.lc-upg .up-ar { font-size: 13px; }
-.lc-upg:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 1px 0 var(--green-edge), 0 2px 4px rgba(0,0,0,.3); }
-.lc-upg:disabled { filter: grayscale(.5) brightness(.85); cursor: default; }
-.lc-upg.maxed { background: linear-gradient(#5a6473, #3c4452); box-shadow: 0 4px 0 #2a313c, 0 5px 8px rgba(0,0,0,.3); color: #cdd9ec; }
 
 /* ---------- garage popup ---------- */
 .garage-panel { width: 88%; max-width: 360px; padding: 16px 14px 14px; text-align: left; gap: 12px; }
@@ -395,6 +354,11 @@ button:disabled:active { transform: none; }
 
 /* ---------- bottom nav ---------- */
 .nav { display: flex; gap: 8px; }
+/* With the loadout cards and map preview gone the menu had a lot of slack at the bottom.
+   Split the free space so the campaign card sits in the middle of the screen and the nav
+   bar pins to the bottom, instead of everything bunching under the logo. */
+#menu .campaign { margin-top: auto; }
+#menu .nav { margin-top: auto; }
 .navbtn {
   flex: 1; padding: 10px 0 9px; font-size: 23px; border-radius: 16px; min-height: 64px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
@@ -1027,8 +991,6 @@ button:disabled:active { transform: none; }
 /* ===================== SOUND TOGGLE + FTUE HINTS + LEVEL STARS ===================== */
 .chip.snd { position: absolute; top: calc(62px + env(safe-area-inset-top)); right: calc(12px + env(safe-area-inset-right)); z-index: 6; padding: 6px 10px; }  /* floats under the topbar (5 chips overflow narrow screens) */
 /* Play Games Services buttons — float under the topbar on the LEFT (mirrors the sound chip on the right) */
-.games-btns { position: absolute; top: calc(62px + env(safe-area-inset-top)); left: calc(12px + env(safe-area-inset-left)); z-index: 6; display: flex; gap: 8px; }
-.chip.games { padding: 6px 10px; cursor: pointer; border: none; font: inherit; }
 .ftue {
   position: absolute; z-index: 40; left: 50%;
   background: linear-gradient(180deg, #ffe28a, #ffd24a); color: #3a2a00;
@@ -1036,7 +998,10 @@ button:disabled:active { transform: none; }
   box-shadow: 0 4px 0 #b07d22, 0 8px 16px rgba(0,0,0,.4);
   animation: ftueBob 1s ease-in-out infinite; pointer-events: none; white-space: nowrap;
 }
-#ftuePlay { bottom: 214px; }
+/* The menu hint sits in the flow directly above PLAY, so it can't collide with the
+   button the way a hardcoded bottom offset did once the menu got shorter. */
+#ftuePlay { position: static; align-self: center; margin: 8px 0 2px; animation-name: ftueBobFlow; }
+@keyframes ftueBobFlow { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-9px); } }
 .ftue-deploy { bottom: 158px; }
 @keyframes ftueBob { 0%, 100% { transform: translate(-50%, 0); } 50% { transform: translate(-50%, -9px); } }
 .ln-best { color: #ffd24a; font-style: normal; font-size: 12px; letter-spacing: 1.5px; margin-left: 6px; }
@@ -1051,9 +1016,6 @@ button:disabled:active { transform: none; }
 .tik em { color: #8fd3ff; font-style: normal; font-size: 12px; margin-left: 5px; }
 
 
-/* tank art in the menu loadout card: zoomed in and centered (the raw tank svg has padding).
-   Other heroes are pre-cropped by fitHeroSvg() to fill the box, so they must NOT be zoomed. */
-#loadHero .lc-art.is-tank svg { transform: translate(12px, -16px) scale(2); transform-origin: 27% 80%; }
 
 
 /* 5★ rate-us prompt — big glowing gold stars */
@@ -1234,10 +1196,6 @@ button:disabled:active { transform: none; }
 .cp-prog { display: block; width: 100%; height: 10px; border-radius: 6px; background: #0a1a38; overflow: hidden; border: 1.5px solid #4f6f9c; }
 .cp-prog i { display: block; height: 100%; width: 0; background: linear-gradient(#ffd86a, #f0a72e); border-radius: 6px; transition: width .4s ease; }
 .cp-sub { font-size: 11px; font-weight: 700; color: #9fc4ef; }
-.map-preview { margin: 8px auto 0; width: 82%; max-width: 320px; aspect-ratio: 3 / 2; border-radius: 16px; overflow: hidden; border: 3px solid #5a96cc; box-shadow: 0 6px 14px rgba(0,0,0,.4), inset 0 0 0 1px rgba(255,255,255,.15); background: #6fbf5a; }
-.map-preview canvas { width: 100%; height: 100%; display: block; }
-.loadout { margin-top: 8px; }
-.lc-art svg { padding: 3px; }
 #playBtn, #toBattle { margin-top: 6px; }
 
 /* battle HUD */
@@ -1361,6 +1319,5 @@ button:disabled:active { transform: none; }
 
 .troop-img { width: 100%; height: 100%; object-fit: contain; display: block; filter: drop-shadow(0 6px 6px rgba(0,0,0,.4)); }
 .tc-art .troop-img { width: 150px; height: 150px; margin: -27px; }
-.lc-art .troop-img { width: 84px; height: 84px; margin: -14px; padding: 0; }
 .vs-t .troop-img { width: 90px; height: 90px; margin: -16px -16px -22px; }
 #smIcon .troop-img { width: 190px; height: 190px; margin: -30px; }

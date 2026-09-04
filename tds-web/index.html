@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Fredoka:wght@500;600;700&family=Luckiest+Guy&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="style.css?v=104" />
+<link rel="stylesheet" href="style.css?v=107" />
 </head>
 <body>
 <div class="app" id="app">
@@ -31,11 +31,6 @@
     </header>
     <button class="chip snd" id="sndBtn" aria-label="Sound"><span class="ico">🔊</span></button>
     <button class="chip missions" id="missionBtn" aria-label="Daily quests"><span class="ico">📋</span><span class="mdot" id="missionDot" style="display:none"></span></button>
-    <div class="games-btns" id="gamesBtns" style="display:none">
-      <button class="chip games" id="btnLeaderboard" aria-label="Leaderboards"><span class="ico">🏆</span></button>
-      <button class="chip games" id="btnAchievements" aria-label="Achievements"><span class="ico">🎖️</span></button>
-    </div>
-
     <div class="logo">
       <span class="logo-top">TOWER&nbsp;WAR</span>
       <span class="logo-bot">CONQUEST</span>
@@ -48,28 +43,9 @@
       <span class="cp-prog"><i id="m_regionFill"></i></span>
       <span class="cp-sub" id="m_regionSub">0 / 20 captured</span>
     </button>
-    <div class="map-preview" id="mapPreview"><canvas id="pv" width="300" height="200"></canvas></div>
 
-    <!-- army: equipped soldier + tank (tap to swap · ⬆ upgrades) -->
-    <div class="loadout">
-      <div class="load-card" id="loadSoldier" role="button" tabindex="0">
-        <div class="lc-top">
-          <span class="lc-art" id="lc_solArt"></span>
-          <span class="lc-info"><b id="lc_solName">SOLDIER</b><i id="lc_solLv">Lv 1</i></span>
-        </div>
-        <button class="lc-upg" id="lc_solUpg" aria-label="Upgrade soldier">⬆</button>
-      </div>
-      <div class="load-card" id="loadTank" role="button" tabindex="0">
-        <div class="lc-top">
-          <span class="lc-art" id="lc_tnkArt"></span>
-          <span class="lc-info"><b id="lc_tnkName">TANK</b><i id="lc_tnkLv">Lv 1</i></span>
-        </div>
-        <button class="lc-upg" id="lc_tnkUpg" aria-label="Upgrade tank">⬆</button>
-      </div>
-    </div>
-
-    <div class="ftue" id="ftuePlay" style="display:none">👇 TAP PLAY TO CONQUER!</div>
     <div class="tik"><span class="tik-ico">🎫</span><b id="tikN">10</b><i>/10</i><em id="tikT"></em></div>
+    <div class="ftue" id="ftuePlay" style="display:none">👇 TAP PLAY TO CONQUER!</div>
     <button class="play imgbtn" id="playBtn" aria-label="Play"></button>
     <nav class="nav">
       <button class="navbtn" id="toShop"><span>🛒</span><i>SHOP</i></button>
@@ -148,7 +124,7 @@
     <header class="topbar solid">
       <button class="iconbtn" id="pvpBack" aria-label="Back">‹</button>
       <div class="title">PVP ARENA</div>
-      <div class="chip trophy"><span class="ico">🏆</span><b id="pv_lp">0</b></div>
+      <button class="chip trophy" id="btnLeaderboard" aria-label="Leaderboard"><span class="ico">🏆</span><b id="pv_lp">0</b></button>
     </header>
     <div class="pvp-wrap">
       <div class="league-card" id="leagueCard"></div>
@@ -378,6 +354,7 @@
       <div class="name-title" id="pfTitle">COMMANDER · Lv 1</div>
       <div class="xp-bar"><i id="pfXp"></i></div>
       <div class="pf-stats" id="pfStats"></div>
+      <button class="rlink" id="btnAchievements" style="display:none">🎖️ Achievements</button>
       <button class="big-btn green" id="pfClose">CLOSE</button>
     </div>
   </div>
@@ -406,6 +383,6 @@
 <script src="iap.js?v=4"></script>
 <script src="troops-art.js?v=3"></script>
 <script src="terrain.js?v=2"></script>
-<script src="game.js?v=208"></script>
+<script src="game.js?v=209"></script>
 </body>
 </html>

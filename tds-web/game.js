@@ -1185,16 +1185,6 @@ function render(){
   drawFx(s);
   if (state.aim){ ctx.fillStyle = 'rgba(255,90,77,.12)'; ctx.fillRect(0, 0, W, H); for (const t of state.towers) if (t.owner >= 2){ const p = toScr(t.x, t.y); ctx.strokeStyle = '#ff5a4d'; ctx.lineWidth = 3; ctx.setLineDash([6, 6]); ctx.lineDashOffset = -state.t * 40; ctx.beginPath(); ctx.arc(p.x, p.y, (TOWER_R[t.type] + 12) * s, 0, 6.283); ctx.stroke(); ctx.setLineDash([]); } }
 }
-// tiny map preview for the menu card
-function drawMini(c2, L, w, h, opts){
-  const g = genLevel(L, opts || {}); const sx = w / MW, sy = h / MH, sc = Math.min(sx, sy); const ox = (w - MW * sc) / 2, oy = (h - MH * sc) / 2;
-  const R = g.region; c2.fillStyle = R.ground; c2.fillRect(0, 0, w, h);
-  if (g.river){ c2.fillStyle = R.water; c2.fillRect(ox, oy + (g.river.y - g.river.h / 2) * sc, MW * sc, g.river.h * sc); }
-  for (const wl of g.walls){ c2.fillStyle = '#a8651f'; c2.fillRect(ox + (wl.x - 14) * sc, oy + (wl.y - 6) * sc, 28 * sc, 12 * sc); }
-  for (const m of g.mines){ c2.fillStyle = '#2c333d'; c2.beginPath(); c2.arc(ox + m.x * sc, oy + m.y * sc, 5 * sc, 0, 6.283); c2.fill(); }
-  for (const t of g.towers){ c2.fillStyle = t.owner ? OWNER_COL[t.owner] : '#b8c0c8'; c2.strokeStyle = '#0a1a38'; c2.lineWidth = 1.5; c2.beginPath(); c2.arc(ox + t.x * sc, oy + t.y * sc, TOWER_R[t.type] * sc, 0, 6.283); c2.fill(); c2.stroke();
-    if (t.type !== 'barracks'){ c2.fillStyle = '#fff'; c2.font = `700 ${Math.max(8, 20 * sc)}px Fredoka, sans-serif`; c2.textAlign = 'center'; c2.fillText({ factory: '⚙', sniper: '🎯', rocket: '🚀', fort: '🏯' }[t.type], ox + t.x * sc, oy + t.y * sc + 4); } }
-}
 
 /* ============================================================================================
    HUD · RESULTS · REWARDS · ADS
@@ -1417,7 +1407,7 @@ function levelComplete(){
 /* ============================================================================================
    MENU · TICKETS · SOUND · STREAK
    ============================================================================================ */
-let _coinsShown = null, _gemsShown = null, _pvShown = '';
+let _coinsShown = null, _gemsShown = null;
 function refreshMenu(){
   if (_coinsShown !== null && Meta.coins !== _coinsShown) bump($('m_coins').parentElement);
   if (_gemsShown !== null && Meta.gems !== _gemsShown) bump($('m_gems').parentElement);
@@ -1428,21 +1418,10 @@ function refreshMenu(){
   let done = 0; for (let i = 1; i <= REGION_SIZE; i++) if (Meta.cleared[(R.id - 1) * REGION_SIZE + i]) done++;
   $('m_regionFill').style.width = (done / REGION_SIZE * 100) + '%'; $('m_regionSub').textContent = `${done} / ${REGION_SIZE} captured`;
   $('m_plv').textContent = 'Lv ' + playerLevel().n;
-  const key = 'L' + Meta.level; if (_pvShown !== key){ _pvShown = key; const pv = $('pv'); if (pv) drawMini(pv.getContext('2d'), Meta.level, pv.width, pv.height); }
-  refreshLoadout(); refreshSndUi(); refreshMissionDot(); regenTickets(); refreshTikUi();
+  refreshSndUi(); refreshMissionDot(); regenTickets(); refreshTikUi();
   const sn = $('streakN'); if (sn) sn.textContent = streakNext();
   const sb = $('toStreak'); if (sb) sb.classList.toggle('ready', streakClaimable());
   const fp = $('ftuePlay'); if (fp) fp.style.display = (Meta.ftue & 1) ? 'none' : '';
-}
-function refreshLoadout(){
-  for (const [kind, ids] of [['soldier', ['lc_solArt','lc_solName','lc_solLv','lc_solUpg']], ['tank', ['lc_tnkArt','lc_tnkName','lc_tnkLv','lc_tnkUpg']]]){
-    const t = troopById(Meta[kind]), s = Meta.troops[t.id] || { lv: 1 };
-    const art = $(ids[0]); if (art && art.dataset.k !== t.id + s.lv){ art.dataset.k = t.id + s.lv; art.innerHTML = TroopArt.svg(t, '#3b8bff'); }
-    $(ids[1]).textContent = t.name.toUpperCase(); const lvEl = $(ids[2]); lvEl.textContent = `${t.rarity} · Lv ${s.lv}`; lvEl.style.color = RARITY_COL[t.rarity];
-    const up = $(ids[3]); const cost = troopCost(s.lv), maxed = s.lv >= TROOP_MAX, needCopy = troopNeedsCopy(s.lv) && (s.n | 0) < 1;
-    if (maxed){ up.classList.add('maxed'); up.disabled = true; up.innerHTML = '<span class="up-ar">MAX</span>'; }
-    else { up.classList.remove('maxed'); up.disabled = Meta.coins < cost || needCopy; up.innerHTML = needCopy ? '<span class="up-ar">🎲</span>copy' : `<span class="up-ar">⬆</span><span class="ico ic-coin"></span>${kfmt(cost)}`; }
-  }
 }
 function regenTickets(){ const now = Date.now(); if (Meta.pticket >= PT_MAX){ Meta.pticketAt = now; return; } const gained = Math.floor((now - Meta.pticketAt) / PT_REGEN_MS); if (gained > 0){ Meta.pticket = Math.min(PT_MAX, Meta.pticket + gained); Meta.pticketAt = Meta.pticket >= PT_MAX ? now : Meta.pticketAt + gained * PT_REGEN_MS; Meta.save(); } }
 function spendTicket(){ regenTickets(); if (Meta.pticket <= 0) return false; if (Meta.pticket >= PT_MAX) Meta.pticketAt = Date.now(); Meta.pticket--; Meta.save(); return true; }
@@ -1799,20 +1778,17 @@ $('toPvp').addEventListener('click', () => show('pvp')); $('pvpBack').addEventLi
 $('toMissions').addEventListener('click', () => show('missions')); $('missionsBack').addEventListener('click', () => show('menu'));
 $('toProfile').addEventListener('click', openProfile); $('pfClose').addEventListener('click', () => $('profileModal').classList.remove('active'));
 $('toStreak').addEventListener('click', openStreak); $('streakClaim').addEventListener('click', claimStreak); $('streakDouble').addEventListener('click', streakDoubleAd); $('streakClose').addEventListener('click', closeStreak);
-$('loadSoldier').addEventListener('click', () => { troopTab = 'soldier'; show('troops'); }); $('loadTank').addEventListener('click', () => { troopTab = 'tank'; show('troops'); });
-$('lc_solUpg').addEventListener('click', e => { e.stopPropagation(); upgradeTroop(Meta.soldier); refreshMenu(); });
-$('lc_tnkUpg').addEventListener('click', e => { e.stopPropagation(); upgradeTroop(Meta.tank); refreshMenu(); });
 document.querySelectorAll('.shtab[data-ttab]').forEach(t => t.addEventListener('click', () => { troopTab = t.dataset.ttab; refreshTroops(); }));
 $('summonBtn').addEventListener('click', summon); $('smOk').addEventListener('click', () => $('summonModal').classList.remove('active')); $('smAgain').addEventListener('click', () => { $('summonModal').classList.remove('active'); summon(); });
 $('pvpFight').addEventListener('click', pvpFight); $('pvpReroll').addEventListener('click', () => { Meta.pvpSeed = (Meta.pvpSeed | 0) + 1; Meta.save(); refreshPvp(); });
 $('sndBtn').addEventListener('click', toggleSound); $('sndBtn2').addEventListener('click', toggleSound);
 { const mb = $('missionBtn'); if (mb) mb.addEventListener('click', openMissions); const mc = $('missionClose'); if (mc) mc.addEventListener('click', () => $('missionModal').classList.remove('active')); }
-{ const lb = $('btnLeaderboard'), ac = $('btnAchievements'), gb = $('gamesBtns');
+/* The leaderboard now hangs off the PVP trophy chip and achievements off the profile
+   card, so the main menu no longer carries a pair of floating Play Games buttons. */
+{ const lb = $('btnLeaderboard'), ac = $('btnAchievements');
   if (lb) lb.addEventListener('click', openLeaderboard);
   if (ac){ ac.addEventListener('click', () => { const G = window.TDSGames; if (!G) return; if (G.ready) return G.showAchievements(); if (G.signIn) G.signIn().then(ok => { if (ok) G.showAchievements(); }); }); ac.style.display = (window.TDSGames && TDSGames.available) ? '' : 'none'; }
-  const showGames = () => { if (gb) gb.style.display = ''; };
-  if (window.TDSLeaderboard && TDSLeaderboard.ready) showGames();
-  document.addEventListener('tds-games-ready', () => { showGames(); if (ac) ac.style.display = ''; });
+  document.addEventListener('tds-games-ready', () => { if (ac) ac.style.display = ''; });
   const lbc = $('lbClose'); if (lbc) lbc.addEventListener('click', () => $('lbModal').classList.remove('active'));
   const twb = $('lbTabWeek'); if (twb) twb.addEventListener('click', () => { lbTab = 'week'; renderLb(); }); const tmb = $('lbTabMonth'); if (tmb) tmb.addEventListener('click', () => { lbTab = 'month'; renderLb(); }); const tab = $('lbTabAll'); if (tab) tab.addEventListener('click', () => { lbTab = 'all'; renderLb(); });
   const mcl = $('monthClaim'); if (mcl) mcl.addEventListener('click', () => $('monthModal').classList.remove('active'));
